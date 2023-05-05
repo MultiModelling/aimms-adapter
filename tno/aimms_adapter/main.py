@@ -8,6 +8,9 @@ from tno.aimms_adapter.settings import EnvSettings
 from tno.shared.log import get_logger
 from werkzeug.exceptions import HTTPException
 
+
+import os
+print('pythonPath:', os.getenv('PYTHONPATH'))
 # Convert warnings into exceptions
 # import sys
 

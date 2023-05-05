@@ -64,12 +64,15 @@ class UniversalLink:
         """
         print(f'Processing ESDL...')
         esh = EnergySystemHandler()
-        try:
-            esh.load_from_string(esdl_string)
-            self.parse_esdl(esh)
-            return True, 'Ok'
-        except Exception as e:
-            return False, str(e)
+      #  try:
+        esh.load_from_string(esdl_string)
+        t,a,v = self.parse_esdl(esh)
+        for table in t:
+            self.create_AIMMS_sql(table,attributes)
+        self.write_table_to_Sql(t, v)
+        return True, 'Ok'
+       # except Exception as e:
+       #     return False, str(e)
 
     def get_sql(self, query: str) -> DataFrame:
         """
@@ -240,6 +243,35 @@ class UniversalLink:
                                     'power varchar(100)'))
             SetofTables.append('Producers')
             SetofValues.append(valProducers)
+
+        Storages = esh.get_all_instances_of_type(esdl.Storage)
+        valStorages = [(n.id,
+                         n.eClass.name,
+                         n.name,
+                         n.capacity,
+                         n.chargeEfficiency,
+                         n.dischargeEfficiency,
+                         n.selfDischargeRate,
+                         n.fillLevel,
+                         n.maxChargeRate,
+                         n.maxDischargeRate,
+                         n.volume if hasattr(n, 'volume') else None,
+                         )
+                        for n in Storages]
+        if (Storages != []):
+            SetofAttributes.append(('id varchar(100) Primary key',
+                                    'esdlType varchar(100)',
+                                    'name varchar(1500)',
+                                    'capacity varchar(100)',
+                                    'chargeEfficiency varchar(100)',
+                                    'dischargeEfficiency varchar(100)',
+                                    'selfDischargeRate varchar(100)',
+                                    'fillLevel varchar(100)',
+                                    'maxChargeRate varchar(100)',
+                                    'maxDischargeRate varchar(100)',
+                                    'volume varchar(100)'))
+            SetofTables.append('Storages')
+            SetofValues.append(valStorages)
 
         Consumers = esh.get_all_instances_of_type(esdl.Consumer)
         valConsumers = [
@@ -670,6 +702,7 @@ class UniversalLink:
             SetofTables.append('QuantityAndUnitTypes')
             SetofValues.append(valQuantityAndUnitTypes)
 
+        return SetofTables, SetofAttributes, SetofValues
 
 
 
