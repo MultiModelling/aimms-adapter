@@ -133,7 +133,7 @@ pycparser==2.21
     # via cffi
 pyecore==0.12.1
     # via pyesdl
-pyesdl==22.7.0
+pyesdl==23.3.0
     # via -r requirements.in
 pyflakes==2.4.0
     # via flake8
@@ -207,6 +207,10 @@ wrapt==1.14.1
     # via astroid
 zipp==3.8.0
     # via importlib-metadata
+
+pyodbc==4.0.39
+# manual
+sqlalchemy-access==1.1.4
 
 # The following packages are considered to be unsafe in a requirements file:
 # pip

@@ -8,15 +8,15 @@ import pandas as pd
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 200)
 
-# current asset types that are not supported by this parser
-ignore_asset_tuple = (esdl.Transport, esdl.Import, esdl.Storage, esdl.Export)
+# current asset types that are not supported by this parser or Opera import
+IGNORED_ASSETS_TUPLE = (esdl.Transport, esdl.Import, esdl.Storage, esdl.Export)
 
 class OperaESDLParser:
 
     def __init__(self):
         self.esh = EnergySystemHandler()
 
-    def parse(self, esdl_string: str):
+    def parse(self, esdl_string: str) -> pd.DataFrame:
         """
         Extracts Cost, ranges of production and values of demand
         :param esdl_string:
@@ -30,6 +30,7 @@ class OperaESDLParser:
         self.esh.load_from_string(esdl_string)
         energy_assets = self.esh.get_all_instances_of_type(esdl.EnergyAsset)
         df = pd.DataFrame({'category': pd.Series(dtype='str'),
+                           'id': pd.Series(dtype='str'),
                            'esdlType': pd.Series(dtype='str'),
                            'name': pd.Series(dtype='str'),
                            'power_min': pd.Series(dtype='float'),
@@ -47,7 +48,7 @@ class OperaESDLParser:
                            })
         for asset in energy_assets:
             max_power = None
-            if not isinstance(asset, ignore_asset_tuple):
+            if not isinstance(asset, IGNORED_ASSETS_TUPLE):
                 asset: esdl.EnergyAsset = asset
                 print(f'Converting {asset.name}')
                 category = esdl_category(asset)
@@ -65,10 +66,10 @@ class OperaESDLParser:
                 singlevalue_profiles_in, singlevalue_profiles_out = extract_port_singlevalue_profiles(asset, ENERGY_IN_PJ)
                 profiles_in = ", ".join([str(p) for p in singlevalue_profiles_in])
                 profiles_out = ", ".join([str(p) for p in singlevalue_profiles_out])
-                print(f"profiles: {singlevalue_profiles_in} and out {singlevalue_profiles_out}")
+                #print(f"profiles: {singlevalue_profiles_in} and out {singlevalue_profiles_out}")
                 opera_equivalent = find_opera_equivalent(asset)
                 print(f'{asset.eClass.name}, {asset.name}, power_range={power_range}, power={max_power}, costs={costs}' )
-                s = [category, asset.eClass.name, asset.name,
+                s = [category, asset.id, asset.eClass.name, asset.name,
                      power_range[0] if power_range else None, power_range[1] if power_range else None,
                      max_power, efficiency, costs[0], costs[1], costs[2],
                      carrier_in, carrier_out, profiles_in, profiles_out, opera_equivalent]
@@ -76,6 +77,7 @@ class OperaESDLParser:
 
         print(df)
         df.to_csv('output.csv')
+        return df
 
 class ParseException(Exception):
     pass
@@ -176,6 +178,10 @@ def extract_port_singlevalue_profiles(asset: esdl.EnergyAsset, target_unit:esdl.
                     singlevalue_in_list.append(convert_to_unit(extract_singlevalue(profile), profile.profileQuantityAndUnit, target_unit))
                 else:
                     singlevalue_out_list.append(convert_to_unit(extract_singlevalue(profile), profile.profileQuantityAndUnit, target_unit))
+            else:
+                print(f"Unsupported profile type for Opera parser {profile.eClass.name}: {profile}, ignoring")
+            if len(p.profile) > 1:
+                print(f"Multiple profiles per port are currently not supported")
 
     return singlevalue_in_list, singlevalue_out_list
 

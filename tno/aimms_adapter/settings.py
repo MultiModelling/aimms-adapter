@@ -63,19 +63,20 @@ class EnvSettings:
     def aimms_procedure():
         return os.getenv("AIMMS_PROCEDURE", "")
 
+    @staticmethod
+    def access_database():
+        """Contains the actual database that Opera uses"""
+        return os.getenv("ACCESS_DATABASE", "Opties_mmvib.mdb")
+    @staticmethod
+    def clean_access_database():
+        """Contains an 'empty' database to which the ESDL can be added for each run"""
+        return os.getenv("CLEAN_ACCESS_DATABASE", "Opties_clean.mdb")
 
     @staticmethod
-    def db_host():
-        return os.getenv("DATABASE_HOST", "")
-    @staticmethod
-    def db_name():
-        return os.getenv("DATABASE_NAME", "")
-    @staticmethod
-    def db_user():
-        return os.getenv("DATABASE_USER", "")
-    @staticmethod
-    def db_password():
-        return os.getenv("DATABASE_PASSWORD", "")
+    def opera_output_folder():
+        """Contains an 'empty' database to which the ESDL can be added for each run"""
+        return os.getenv("OPERA_OUTPUT_FOLDER", r"D:\MMvIB\Opera\Output")
+
 
 
 

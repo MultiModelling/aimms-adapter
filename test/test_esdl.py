@@ -2,6 +2,7 @@ import unittest
 import esdl
 from esdl.esdl_handler import EnergySystemHandler
 
+from tno.aimms_adapter.model.opera_accessdb.results_processor import OperaResultsProcessor
 from tno.aimms_adapter.model.opera_esdl_parser.esdl_parser import OperaESDLParser
 from tno.aimms_adapter.model.opera_esdl_parser.unit import UnitException
 
@@ -34,10 +35,30 @@ class MyTestCase(unittest.TestCase):
         range = tuple([convert_to_unit(v, unit, POWER_IN_MW) for v in range])
         print(range, unit.multiplier, unit.unit)
 
+    def test_parser(self):
         parser = OperaESDLParser()
         esh = EnergySystemHandler()
         esh.load_file('MACRO 7.esdl')
         parser.parse(esh.to_string())
+
+    def test_importer(self):
+        pass
+
+    def test_result_parser(self):
+        import os
+        print(os.getcwd())
+        parser = OperaESDLParser()
+        esh = EnergySystemHandler()
+        esh.load_file('MACRO 7.esdl')
+        df = parser.parse(esh.to_string())
+
+
+        esh = EnergySystemHandler()
+        esh.load_file('MACRO 7.esdl')
+        orp = OperaResultsProcessor(output_path='opera/CSV MMvIB 2030', esh=esh, input_df=df)
+        orp.update_production_capacities()
+
+
 
 
 

@@ -41,7 +41,7 @@ COST_IN_Eur_per_MWh = esdl.QuantityAndUnitType(description="Cost in €/MWh", id
                                         perUnit=esdl.UnitEnum.WATTHOUR)
 
 
-def equals(base_unit: esdl.QuantityAndUnitType, other: esdl.QuantityAndUnitType):
+def equals(base_unit: esdl.QuantityAndUnitType, other: esdl.QuantityAndUnitType) -> bool:
     if base_unit.unit == other.unit and \
             base_unit.multiplier == other.multiplier and \
             base_unit.perUnit == other.per_unit and \
@@ -51,7 +51,7 @@ def equals(base_unit: esdl.QuantityAndUnitType, other: esdl.QuantityAndUnitType)
     return False
 
 
-def same_physical_quantity(base_unit: esdl.QuantityAndUnitType, other: esdl.QuantityAndUnitType):
+def same_physical_quantity(base_unit: esdl.QuantityAndUnitType, other: esdl.QuantityAndUnitType) -> bool:
     if base_unit.physicalQuantity == other.physicalQuantity and \
             base_unit.unit == other.unit and \
             base_unit.perUnit == other.perUnit:
@@ -59,7 +59,7 @@ def same_physical_quantity(base_unit: esdl.QuantityAndUnitType, other: esdl.Quan
     return False
 
 
-def convert_to_unit(value: float, other: esdl.QuantityAndUnitType, target_unit: esdl.QuantityAndUnitType ):
+def convert_to_unit(value: float, other: esdl.QuantityAndUnitType, target_unit: esdl.QuantityAndUnitType ) -> float:
     if other is None:
         raise UnitException(f'Missing unit for source conversion: {other}')
     if same_physical_quantity(target_unit, other):
@@ -68,7 +68,7 @@ def convert_to_unit(value: float, other: esdl.QuantityAndUnitType, target_unit: 
         raise UnitException(f'Unit mismatch inputUnit={other.unit}, toUnit={target_unit.unit}')
 
 
-def convert_multiplier(base_unit: esdl.QuantityAndUnitType, other: esdl.QuantityAndUnitType):
+def convert_multiplier(base_unit: esdl.QuantityAndUnitType, other: esdl.QuantityAndUnitType) -> float:
     return multipier_value(other.multiplier) / multipier_value(base_unit.multiplier)
 
 

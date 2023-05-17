@@ -7,6 +7,8 @@ from uuid import uuid4
 from minio import S3Error
 
 from tno.aimms_adapter.model.model import Model, ModelState
+from tno.aimms_adapter.model.opera_accessdb.opera_access_importer import OperaAccessImporter, copy_clean_access_database
+from tno.aimms_adapter.model.opera_esdl_parser.esdl_parser import OperaESDLParser
 from tno.aimms_adapter.settings import EnvSettings
 from tno.aimms_adapter.types import ModelRunInfo, OperaAdapterConfig, ModelRun
 from tno.aimms_adapter import executor
@@ -62,27 +64,33 @@ class Opera(Model):
         print('ESDL:', input_esdl)
 
         # convert ESDL to MySQL
-        logger.info("Converting ESDL using Universal Link")
-        ul = UniversalLink(host=EnvSettings.db_host(), database=EnvSettings.db_name(),
-                           user=EnvSettings.db_user(), password=EnvSettings.db_password())
-        success, error = ul.esdl_to_db(input_esdl)
-        if not success:
-            logger.error(f"Error executing Universal link: {error}")
+        # logger.info("Converting ESDL using Universal Link")
+        # ul = UniversalLink(host=EnvSettings.db_host(), database=EnvSettings.db_name(),
+        #                    user=EnvSettings.db_user(), password=EnvSettings.db_password())
+        # success, error = ul.esdl_to_db(input_esdl)
+        parser = OperaESDLParser()
+        try:
+            esdl_in_dataframe = parser.parse(esdl_string=input_esdl)
+        except Exception as e:
+            logger.error(f"Parse exception for ESDL input: {e}")
             return ModelRunInfo(
                 model_run_id=model_run_id,
                 state=ModelState.ERROR,
-                reason=error
+                reason=str(e)
             )
 
-        logger.info("ESDL Database created for use by AIMMS")
+        copy_clean_access_database(EnvSettings.clean_access_database(), EnvSettings.access_database())
+        logger.info("Importing ESDL into Opera database")
+        oai = OperaAccessImporter()
+        oai.start_import(esdl_data_frame=esdl_in_dataframe, access_database="file")
         # start aimms via subprocess
         print(f"AIMMS binary at {EnvSettings.aimms_exe_path()}")
         print(f"AIMMS model at {EnvSettings.aimms_model_path()}")
         print(f"AIMMS start procedure {EnvSettings.aimms_procedure()}")
 
-        aimms_exe_path = "C:\\data\\git\\aimms-adapter\\subprocess_test\\slow.bat"
-        start_procedure = "default_setup"
-        aimms_model_path = "c:\\bla\model.aimms"
+        aimms_exe_path = EnvSettings.aimms_exe_path()
+        start_procedure = EnvSettings.aimms_procedure()
+        aimms_model_path = EnvSettings.aimms_model_path()
         params = [aimms_exe_path, "-R", start_procedure, aimms_model_path] # --minimized
 
         # fake opera by running Ping command, that takes some time to run
@@ -106,6 +114,7 @@ class Opera(Model):
         # get output
         if aimms.returncode == 0:
             logger.info("AIMMS has finished, collecting results...")
+
             return ModelRunInfo(
                 model_run_id=model_run_id,
                 state=ModelState.SUCCEEDED,

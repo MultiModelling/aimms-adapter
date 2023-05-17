@@ -19,6 +19,10 @@ pymysql
 cryptography
 pandas
 
+# for Access DB
+sqlalchemy-access
+pyodbc
+
 minio
 pyesdl
 requests
