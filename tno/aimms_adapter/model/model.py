@@ -81,8 +81,8 @@ class Model(ABC):
         if model_run_id in self.model_run_dict:
             res = self.process_results(result)
             if res and self.minio_client:
-                content = BytesIO(bytes(res, 'ascii'))
-                path = self.model_run_dict[model_run_id].config.output_file_path
+                content = BytesIO(bytes(res, 'utf8'))
+                path = self.model_run_dict[model_run_id].config.output_esdl_file_path
                 bucket = path.split("/")[0]
                 rest_of_path = "/".join(path.split("/")[1:])
 

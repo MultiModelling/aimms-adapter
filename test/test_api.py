@@ -24,8 +24,8 @@ else:
     exit(1)
 
 post_body = {
-  "input_esdl_file_path": "opera-test/NL II3050 with carriers_marginal_cost.esdl",
-  "output_esdl_file_path": "output.esdl"
+  "input_esdl_file_path": "opera-test/MACRO 7.esdl",
+  "output_esdl_file_path": "opera-test/OperaOutput.esdl"
 }
 
 res = requests.post(api_endpoint + '/model/initialize/' + model_run_id, json=post_body)
@@ -64,14 +64,14 @@ while not succeeded:
         print("Endpoint /model/status not ok!")
         exit(1)
 
-# res = requests.get(api_endpoint + '/model/results/' + model_run_id)
-# if res.ok:
-#     print("Endpoint /model/results ok!")
-#     result = res.json()
-#     print(result)
-# else:
-#     print("Endpoint /model/results not ok!")
-#     exit(1)
+res = requests.get(api_endpoint + '/model/results/' + model_run_id)
+if res.ok:
+    print("Endpoint /model/results ok!")
+    result = res.json()
+    print(result)
+else:
+    print("Endpoint /model/results not ok!")
+    exit(1)
 
 res = requests.get(api_endpoint + '/model/remove/' + model_run_id)
 if res.ok:

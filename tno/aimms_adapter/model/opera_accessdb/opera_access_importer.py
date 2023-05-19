@@ -33,6 +33,7 @@ class OperaAccessImporter:
     scenario = 'MMvIB'
     default_sector = 'Energie'
     df: pd.DataFrame = None  # df with ESDL as a table
+    engine = None  # db engine
     conn = None  # db connection
     cursor = None  # db cursor
     not_consumer_options: pd.DataFrame = None
@@ -44,7 +45,7 @@ class OperaAccessImporter:
         self.default_sector = default_sector
 
     def connect_to_access(self, access_file: str):
-        access_file = r'C:\data\git\aimms-adapter\esdl2opera_access\Opties_mmvib.mdb'
+        #access_file = r'C:\data\git\aimms-adapter\esdl2opera_access\Opties_mmvib.mdb'
         odbc_string = r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=' + access_file + ';'
 
         print(f"Connecting to database {access_file}")
@@ -52,9 +53,9 @@ class OperaAccessImporter:
             "access+pyodbc",
             query={"odbc_connect": odbc_string}
         )
-        engine = sa.create_engine(connection_url)
-        engine.connect()
-        self.conn = engine.raw_connection()
+        self.engine = sa.create_engine(connection_url)
+        self.engine.connect()
+        self.conn = self.engine.raw_connection()
         self.cursor = self.conn.cursor()
 
     def disconnect(self):
@@ -79,6 +80,7 @@ class OperaAccessImporter:
     def _create_energycarriers(self):
         carriers = pd.concat([self.df['carrier_in'], self.df['carrier_out']]).dropna().unique()
         for carrier in carriers:
+            if carrier == "": continue
             new_carrier_name = opera_energycarrier(carrier)
             sql = "SELECT * FROM [Energiedragers] WHERE [Energiedrager] = '{}'".format(new_carrier_name)
             df = psql.read_sql(sql, self.engine)
@@ -283,8 +285,9 @@ class OperaAccessImporter:
 
             # Add option to Energiegebruik table, update efficiency in  Effect column (x unit required for 1 unit of output)
             # first input carriers
-            carrier_in = opera_energycarrier(row['carrier_in'])
-            if carrier_in is not None:
+            carrier_in = row['carrier_in']
+            if carrier_in is not None and carrier_in:
+                carrier_in = opera_energycarrier(carrier_in)  # convert to Opera version of this ESDL carrier
                 sql = "SELECT * FROM [Energiegebruik(Optie,Energiedrager,Variant,Jaar)] WHERE [Nr] = {} AND [Jaar] = '{}' AND [Energiedrager] = '{}'".format(
                     new_optie_nr, self.year, carrier_in)
                 df = psql.read_sql(sql, self.engine)
@@ -298,8 +301,9 @@ class OperaAccessImporter:
                     print(
                         f'Option {df_optie.Nr.values}/{new_opt} is already present in [Energiegebruik(Optie,Energiedrager,Variant,Jaar)]')
 
-            carrier_out = opera_energycarrier(row['carrier_out'])
-            if carrier_out is not None:
+            carrier_out = row['carrier_out']
+            if carrier_out is not None and carrier_out:
+                carrier_out = opera_energycarrier(carrier_out)  # convert to opera equivalent of this ESDL carrier
                 sql = "SELECT * FROM [Energiegebruik(Optie,Energiedrager,Variant,Jaar)] WHERE [Nr] = {} AND [Jaar] = '{}' AND [Energiedrager] = '{}'".format(
                     new_optie_nr, self.year, carrier_out)
                 df = psql.read_sql(sql, self.engine)
@@ -322,19 +326,30 @@ class OperaAccessImporter:
                 sql = "SELECT * FROM [CatJaarScen(categorie,jaar,scenario)] WHERE [Categorie] = '{}' AND [Jaar] = '{}' AND [Scenario] = '{}'".format(
                     int(df_ref_option.Nr), self.year, self.scenario)
                 df3 = psql.read_sql(sql, self.engine)
-                df3.Categorie = new_optie_nr
-                df3['Max totale capaciteit'] = row['power_max'] if not pd.isna(row['power_max']) else None
-                df3['Min totale capaciteit'] = row['power_min'] if not pd.isna(row['power_min']) else 0
+                if not df3.empty:  # can use reference option
+                    print(f"Adding new CatJaarScen for optie {new_optie_nr}/{new_opt}, based on reference option {ref_option_name}")
+                    df3.Categorie = new_optie_nr
+                    df3['Max totale capaciteit'] = row['power_max'] if not pd.isna(row['power_max']) else None
+                    df3['Min totale capaciteit'] = row['power_min'] if not pd.isna(row['power_min']) else 0
 
-                col = [[i] for i in df3.columns]
+                    col = [[i] for i in df3.columns]
+                    sql = 'INSERT INTO [CatJaarScen(categorie,jaar,scenario)] ({}) VALUES ({}{})'.format(str(col)[1:-1], '?,' * (len(df3.columns) - 1), '?').replace("'", "")
+                    #print(sql)
+                    #print(df3)
+                    #print(list(df3.itertuples(index=False, name=None)))
+                    self.cursor.executemany(
+                        sql,
+                        list(df3.itertuples(index=False, name=None)))
+                else:
+                    print(f"Adding new CatJaarScen for optie {new_optie_nr}/{new_opt}")
+                    max_capacity = row['power_max'] if not pd.isna(row['power_max']) else 0 #None
+                    min_capacity = row['power_min'] if not pd.isna(row['power_min']) else 0
+                    # currently not filling in columns [Max aantal], [Max kosten], [Min aantal], [Min kosten],
+                    sql = f'INSERT INTO [CatJaarScen(categorie,jaar,scenario)] ([Categorie], [Jaar], [Scenario], [Max totale capaciteit], [Min totale capaciteit]) ' \
+                          f"VALUES ('{new_optie_nr}', '{self.year}', '{self.scenario}', {max_capacity}, {min_capacity});"
+                    #print(sql)
+                    self.cursor.execute(sql)
 
-                self.cursor.executemany(
-                    'INSERT INTO [CatJaarScen(categorie,jaar,scenario)] ({}) VALUES ({}{})'.format(str(col)[1:-1],
-                                                                                                   '?,' * (
-                                                                                                           len(df3.columns) - 1),
-                                                                                                   '?').replace("'",
-                                                                                                                ""),
-                    list(df3.itertuples(index=False, name=None)))
                 self.conn.commit()
 
             else:

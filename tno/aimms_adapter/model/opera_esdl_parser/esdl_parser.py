@@ -16,6 +16,9 @@ class OperaESDLParser:
     def __init__(self):
         self.esh = EnergySystemHandler()
 
+    def get_energy_system_Hander(self) -> EnergySystemHandler:
+        return self.esh
+
     def parse(self, esdl_string: str) -> pd.DataFrame:
         """
         Extracts Cost, ranges of production and values of demand

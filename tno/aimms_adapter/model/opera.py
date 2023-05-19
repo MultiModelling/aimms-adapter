@@ -8,11 +8,11 @@ from minio import S3Error
 
 from tno.aimms_adapter.model.model import Model, ModelState
 from tno.aimms_adapter.model.opera_accessdb.opera_access_importer import OperaAccessImporter, copy_clean_access_database
+from tno.aimms_adapter.model.opera_accessdb.results_processor import OperaResultsProcessor
 from tno.aimms_adapter.model.opera_esdl_parser.esdl_parser import OperaESDLParser
 from tno.aimms_adapter.settings import EnvSettings
 from tno.aimms_adapter.types import ModelRunInfo, OperaAdapterConfig, ModelRun
 from tno.aimms_adapter import executor
-from tno.aimms_adapter.universal_link.universal_link import UniversalLink
 from tno.shared.log import get_logger
 
 logger = get_logger(__name__)
@@ -61,7 +61,7 @@ class Opera(Model):
             )
 
         input_esdl = input_esdl_bytes.decode('utf-8')
-        print('ESDL:', input_esdl)
+        print('Input ESDL:', input_esdl)
 
         # convert ESDL to MySQL
         # logger.info("Converting ESDL using Universal Link")
@@ -82,7 +82,7 @@ class Opera(Model):
         copy_clean_access_database(EnvSettings.clean_access_database(), EnvSettings.access_database())
         logger.info("Importing ESDL into Opera database")
         oai = OperaAccessImporter()
-        oai.start_import(esdl_data_frame=esdl_in_dataframe, access_database="file")
+        oai.start_import(esdl_data_frame=esdl_in_dataframe, access_database=EnvSettings.access_database())
         # start aimms via subprocess
         print(f"AIMMS binary at {EnvSettings.aimms_exe_path()}")
         print(f"AIMMS model at {EnvSettings.aimms_model_path()}")
@@ -94,7 +94,7 @@ class Opera(Model):
         params = [aimms_exe_path, "-R", start_procedure, aimms_model_path] # --minimized
 
         # fake opera by running Ping command, that takes some time to run
-        params = ["ping", "-n", "20", "127.0.0.1"]
+        params = ["ping", "-n", "10", "127.0.0.1"]
 
         logger.info("Starting AIMMS...")
         aimms = subprocess.Popen(params, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -114,10 +114,17 @@ class Opera(Model):
         # get output
         if aimms.returncode == 0:
             logger.info("AIMMS has finished, collecting results...")
+            esh = parser.get_energy_system_Hander()
+            orp = OperaResultsProcessor(input_df=esdl_in_dataframe,
+                                        esh=esh,
+                                        output_path=EnvSettings.opera_output_folder())
+            orp.update_production_capacities()
+            updated_esdl_string = esh.to_string()
 
             return ModelRunInfo(
                 model_run_id=model_run_id,
                 state=ModelState.SUCCEEDED,
+                result = {'esdl': updated_esdl_string}
             )#, simulation_id
         else:
             # error
@@ -196,7 +203,7 @@ class Opera(Model):
             )
 
     def process_results(self, result):
-        return json.dumps(result)
+        return result['esdl']  # returns the ESDL string of the updated ESDL
 
     def results(self, model_run_id: str):
         # Issue: if status already runs executor.future.pop, future does not exist anymore
@@ -205,6 +212,7 @@ class Opera(Model):
                 future = executor.futures.pop(model_run_id)
                 model_run_info = future.result()
                 if model_run_info.result is not None:
+                    print("Opera Run has ESDL result:")
                     print(model_run_info.result)
                 else:
                     logger.warning("No result in model_run_info variable")

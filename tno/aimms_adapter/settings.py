@@ -65,17 +65,17 @@ class EnvSettings:
 
     @staticmethod
     def access_database():
-        """Contains the actual database that Opera uses"""
-        return os.getenv("ACCESS_DATABASE", "Opties_mmvib.mdb")
+        """Contains the actual database that Opera uses (where the dsn file refers to)"""
+        return os.getenv("ACCESS_DATABASE", "opera/Opties_mmvib.mdb")
     @staticmethod
     def clean_access_database():
         """Contains an 'empty' database to which the ESDL can be added for each run"""
-        return os.getenv("CLEAN_ACCESS_DATABASE", "Opties_clean.mdb")
+        return os.getenv("CLEAN_ACCESS_DATABASE", "opera/clean_db/Opties_mmvib_old.mdb")
 
     @staticmethod
     def opera_output_folder():
         """Contains an 'empty' database to which the ESDL can be added for each run"""
-        return os.getenv("OPERA_OUTPUT_FOLDER", r"D:\MMvIB\Opera\Output")
+        return os.getenv("OPERA_OUTPUT_FOLDER", r"opera/CSV MMvIB 2030/")
 
 
 
