@@ -94,7 +94,7 @@ class Opera(Model):
         params = [aimms_exe_path, "-R", start_procedure, aimms_model_path] # --minimized
 
         # fake opera by running Ping command, that takes some time to run
-        params = ["ping", "-n", "10", "127.0.0.1"]
+        #params = ["ping", "-n", "10", "127.0.0.1"]
 
         logger.info("Starting AIMMS...")
         aimms = subprocess.Popen(params, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

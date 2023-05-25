@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name="MMvIB ESSIM Model Adapter",
-    version="0.1",
+    name="MMvIB Opera Model Adapter",
+    version="0.2",
     packages=["tno"],
 )
