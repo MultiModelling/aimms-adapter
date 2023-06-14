@@ -80,16 +80,27 @@ class Model(ABC):
     def store_result(self, model_run_id: str, result):
         if model_run_id in self.model_run_dict:
             res = self.process_results(result)
-            if res and self.minio_client:
-                content = BytesIO(bytes(res, 'utf8'))
+            if res:
                 path = self.model_run_dict[model_run_id].config.output_esdl_file_path
-                bucket = path.split("/")[0]
-                rest_of_path = "/".join(path.split("/")[1:])
+                if self.minio_client:
+                    content = BytesIO(bytes(res, 'utf8'))
 
-                if not self.minio_client.bucket_exists(bucket):
-                    self.minio_client.make_bucket(bucket)
+                    bucket = path.split("/")[0]
+                    rest_of_path = "/".join(path.split("/")[1:])
 
-                self.minio_client.put_object(bucket, rest_of_path, content, content.getbuffer().nbytes)
+                    if not self.minio_client.bucket_exists(bucket):
+                        self.minio_client.make_bucket(bucket)
+
+                    self.minio_client.put_object(bucket, rest_of_path, content, content.getbuffer().nbytes)
+                else:
+                    if path[:7] == 'file://': # local file
+                        filename = path[7:]
+                        logger.info("Writing result ESDL to disk: " + filename)
+                        with open(filename, 'w') as file:
+                            file.write(res)
+                    else:
+                        raise IOError("Don't know how to write file " + path)
+
                 self.model_run_dict[model_run_id].result = {
                     "path": path
                 }

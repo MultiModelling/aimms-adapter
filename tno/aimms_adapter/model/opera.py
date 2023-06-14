@@ -42,25 +42,34 @@ class Opera(Model):
         )
 
     def start_aimms_model(self, config: OperaAdapterConfig, model_run_id):
-        logger.info(f"Loading ESDL from store at {config.input_esdl_file_path}")
-        try:
-            input_esdl_bytes = self.load_from_minio(config.input_esdl_file_path)
-            if input_esdl_bytes is None:
+        input_esdl: str
+        if config.input_esdl_file_path[:7] == 'file://':
+            logger.info(f"Loading ESDL from local disk at {config.input_esdl_file_path[7:]}")
+            # local file
+            with open(config.input_esdl_file_path[7:], 'r') as file:
+                input_esdl = file.read()
+        else: # assume minio
+            try:
+                logger.info(f"Loading ESDL from Inter Model Storage (Minio) at {config.input_esdl_file_path}")
+                input_esdl_bytes = self.load_from_minio(config.input_esdl_file_path)
+                if input_esdl_bytes is None:
+                    logger.error(f"Error retrieving {config.input_esdl_file_path} from Minio")
+                    return ModelRunInfo(
+                        model_run_id=model_run_id,
+                        state=ModelState.ERROR,
+                        reason=f"Error retrieving {config.input_esdl_file_path} from Minio"
+                    )
+                else:
+                    input_esdl = input_esdl_bytes.decode('utf-8')
+            except S3Error as e:
                 logger.error(f"Error retrieving {config.input_esdl_file_path} from Minio")
                 return ModelRunInfo(
                     model_run_id=model_run_id,
                     state=ModelState.ERROR,
                     reason=f"Error retrieving {config.input_esdl_file_path} from Minio"
                 )
-        except S3Error as e:
-            logger.error(f"Error retrieving {config.input_esdl_file_path} from Minio")
-            return ModelRunInfo(
-                model_run_id=model_run_id,
-                state=ModelState.ERROR,
-                reason=f"Error retrieving {config.input_esdl_file_path} from Minio"
-            )
 
-        input_esdl = input_esdl_bytes.decode('utf-8')
+
         print('Input ESDL:', input_esdl)
 
         # convert ESDL to MySQL
