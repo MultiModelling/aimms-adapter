@@ -1,7 +1,9 @@
+from dataclasses import dataclass
 from typing import Tuple, Union, Optional, List
 
 from esdl.esdl_handler import EnergySystemHandler
-from .unit import convert_to_unit, POWER_IN_GW, ENERGY_IN_PJ, COST_IN_MEur, POWER_IN_W, COST_IN_Eur_per_MWh
+from .unit import convert_to_unit, POWER_IN_GW, ENERGY_IN_PJ, COST_IN_MEur, POWER_IN_W, COST_IN_Eur_per_MWh, \
+    ENERGY_IN_J, UnitException, COST_IN_MEur_per_GW, COST_IN_MEur_per_GW_per_year, COST_IN_MEur_per_PJ
 import esdl
 import pandas as pd
 
@@ -9,7 +11,7 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 200)
 
 # current asset types that are not supported by this parser or Opera import
-IGNORED_ASSETS_TUPLE = (esdl.Transport, esdl.Import, esdl.Storage, esdl.Export)
+IGNORED_ASSETS_TUPLE = (esdl.Transport, esdl.Import, esdl.Export)
 
 class OperaESDLParser:
 
@@ -27,7 +29,9 @@ class OperaESDLParser:
         """
         print(f"Power unit : {POWER_IN_GW.description}")
         print(f"Energy unit: {ENERGY_IN_PJ.description}")
-        print(f"Cost unit: {COST_IN_MEur.description}")
+        print(f"CAPEX Cost unit: {COST_IN_MEur_per_GW}")
+        print(f"OPEX Cost unit: {COST_IN_MEur_per_GW_per_year}")
+        print(f"Variable OPEX Cost unit: {COST_IN_MEur_per_PJ}")
         print(f"Marginal Cost unit: {COST_IN_Eur_per_MWh.description}")
 
         self.esh.load_from_string(esdl_string)
@@ -42,43 +46,70 @@ class OperaESDLParser:
                            'efficiency': pd.Series(dtype='float'),
                            'investment_cost': pd.Series(dtype='float'),
                            'o_m_cost': pd.Series(dtype='float'),
+                           'variable_o_m_cost': pd.Series(dtype='float'),
                            'marginal_cost': pd.Series(dtype='float'),
                            'carrier_in': pd.Series(dtype='str'),
                            'carrier_out': pd.Series(dtype='str'),
                            'profiles_in': pd.Series(dtype='str'),
                            'profiles_out': pd.Series(dtype='str'),
+                           'storage_capacity': pd.Series(dtype='float'),
+                           'storage_charge_efficiency': pd.Series(dtype='float'),
+                           'storage_discharge_efficiency': pd.Series(dtype='float'),
+                           'storage_slow_loadtime': pd.Series(dtype='float'),
+                           'storage_fast_loadtime': pd.Series(dtype='float'),
+                           'storage_slow_unloadtime': pd.Series(dtype='float'),
+                           'storage_fast_unloadtime': pd.Series(dtype='float'),
+                           'storage_losses_perhour': pd.Series(dtype='str'),
                            'opera_equivalent': pd.Series(dtype='str')
                            })
         for asset in energy_assets:
             max_power = None
-            if not isinstance(asset, IGNORED_ASSETS_TUPLE):
-                asset: esdl.EnergyAsset = asset
-                print(f'Converting {asset.name}')
-                category = esdl_category(asset)
-                power_range, unit = extract_range(asset, 'power')
-                print("Power range: ", power_range)
-                if power_range:
-                    power_range = tuple([convert_to_unit(v, unit, POWER_IN_GW) for v in power_range])
-                if hasattr(asset, 'power'):
-                    max_power = convert_to_unit(asset.power, POWER_IN_W, POWER_IN_GW) if asset.power else None
-                efficiency = extract_efficiency(asset)
-                costs = extract_costs(asset)
-                carrier_in_list, carrier_out_list = extract_carriers(asset)
-                carrier_in = ", ".join(carrier_in_list)
-                carrier_out = ", ".join(carrier_out_list)
-                singlevalue_profiles_in, singlevalue_profiles_out = extract_port_singlevalue_profiles(asset, ENERGY_IN_PJ)
-                profiles_in = ", ".join([str(p) for p in singlevalue_profiles_in])
-                profiles_out = ", ".join([str(p) for p in singlevalue_profiles_out])
-                #print(f"profiles: {singlevalue_profiles_in} and out {singlevalue_profiles_out}")
-                opera_equivalent = find_opera_equivalent(asset)
-                print(f'{asset.eClass.name}, {asset.name}, power_range={power_range}, power={max_power}, costs={costs}' )
-                s = [category, asset.id, asset.eClass.name, asset.name,
-                     power_range[0] if power_range else None, power_range[1] if power_range else None,
-                     max_power, efficiency, costs[0], costs[1], costs[2],
-                     carrier_in, carrier_out, profiles_in, profiles_out, opera_equivalent]
-                df.loc[len(df)] = s
+            try:
+                if not isinstance(asset, IGNORED_ASSETS_TUPLE) and asset.state != esdl.AssetStateEnum.DISABLED:
+                    asset: esdl.EnergyAsset = asset
+                    print(f'Converting {asset.name}:')
+                    category = esdl_category(asset)
 
-        print(df)
+                    power_range, unit = extract_range(asset, 'power')
+                    print("\t- Power range: ", power_range)
+                    if power_range:
+                        power_range = tuple([convert_to_unit(v, unit, POWER_IN_GW) for v in power_range])
+                    if hasattr(asset, 'power'):
+                        max_power = convert_to_unit(asset.power, POWER_IN_W, POWER_IN_GW) if asset.power else None
+
+                    capacity_range, unit = extract_range(asset, 'capacity')
+                    print("\t- Capacity range: ", power_range)
+                    if capacity_range:
+                        # a bit of a hack to use power range instead of capacity range (with diferent Unit)
+                        power_range = tuple([convert_to_unit(v, unit, ENERGY_IN_PJ) for v in capacity_range])
+
+                    efficiency = extract_efficiency(asset)
+                    costs = extract_costs(asset)
+                    carrier_in_list, carrier_out_list = extract_carriers(asset)
+                    carrier_in = ", ".join(carrier_in_list)
+                    carrier_out = ", ".join(carrier_out_list)
+                    singlevalue_profiles_in, singlevalue_profiles_out = extract_port_singlevalue_profiles(asset, ENERGY_IN_PJ)
+                    profiles_in = ", ".join([str(p) for p in singlevalue_profiles_in])
+                    profiles_out = ", ".join([str(p) for p in singlevalue_profiles_out])
+                    #print(f"profiles: {singlevalue_profiles_in} and out {singlevalue_profiles_out}")
+                    sa = StorageAttributes()
+                    if isinstance(asset, esdl.Storage):
+                        sa = extract_storage_attributes(asset)
+                    opera_equivalent = find_opera_equivalent(asset)
+                    print(f'\t- {asset.eClass.name}, {asset.name}, power_range={power_range}, power={max_power}, costs={costs}' )
+                    s = [category, asset.id, asset.eClass.name, asset.name,
+                         power_range[0] if power_range else None, power_range[1] if power_range else None,
+                         max_power, efficiency, costs[0], costs[1], costs[2], costs[3],
+                         carrier_in, carrier_out, profiles_in, profiles_out,
+                         sa.capacity, sa.chargeEfficiency, sa.disChargeEfficiency, sa.slowLoadTime, sa.fastLoadTime,
+                         sa.slowUnloadTime, sa.fastUnloadTime, sa.lossesPerHour,
+                         opera_equivalent]
+                    df.loc[len(df)] = s
+            except UnitException as ue:
+                print(f"Error parsing input: asset {asset.name} not configured correctly: {ue}")
+                raise ue
+
+        #print(df)
         df.to_csv('output.csv')
         return df
 
@@ -86,10 +117,12 @@ class ParseException(Exception):
     pass
 
 
-def extract_range(asset: esdl.EnergyAsset, attribute_name:str) -> Tuple[Tuple[float, float], esdl.QuantityAndUnitType]:
+def extract_range(asset: esdl.EnergyAsset, attribute_name: str) -> Tuple[
+    Tuple[float, float] | None, esdl.QuantityAndUnitType | None]:
     """
-    Returns the Range constraint of this energy asset as a tuple, plus the unit of the range
+    Returns the Range constraint of this energy asset as a tuple, plus the unit of the range, e.g. (0,20), PowerInGW
     Returns None, None if nothing is found
+    :param attribute_name: the name of the attribute, e.g. 'power' or 'capacity'
     :param asset:
     :return:
     """
@@ -103,9 +136,39 @@ def extract_range(asset: esdl.EnergyAsset, attribute_name:str) -> Tuple[Tuple[fl
                     print(f"No unit specified for constraint of asset {asset.name}, assuming WATT")
                     constraint_range.profileQuantityAndUnit = POWER_IN_W
                 return (constraint_range.minValue, constraint_range.maxValue), constraint_range.profileQuantityAndUnit
-            else:
-                raise ParseException(f'Can\'t find an Ranged constrained for asset {asset.name} with attribute name {attribute_name}')
+            #else:
+            #    raise ParseException(f'Can\'t find an Ranged constrained for asset {asset.name} with attribute name {attribute_name}')
     return None, None # make sure unpacking works
+
+
+@dataclass(init=False)
+class StorageAttributes:
+    capacity: float = None # in PJ
+    fastLoadTime: float = None  # in hours
+    slowLoadTime: float = None  # in hours
+    fastUnloadTime: float = None
+    slowUnloadTime: float = None
+    chargeEfficiency: float = None  # factor
+    disChargeEfficiency: float = None  # factor
+    lossesPerHour: float = None
+
+def extract_storage_attributes(asset: esdl.Storage) -> StorageAttributes:
+    sa = StorageAttributes()
+    sa.capacity = convert_to_unit(asset.capacity, ENERGY_IN_J, ENERGY_IN_PJ)
+    # fast load Time in hour = (maxChargeRate (W) = (J/s * 3600) = 1 J
+    # 22PJ / 8800TW =
+    # next four Unit = hours
+    sa.fastLoadTime = asset.capacity / (asset.maxChargeRate * 3600) if asset.maxChargeRate != 0.0 else None
+    sa.slowLoadTime = asset.capacity / (asset.maxChargeRate * 3600) if asset.maxChargeRate != 0.0 else None
+    sa.fastUnloadTime = asset.capacity / (asset.maxDischargeRate * 3600) if asset.maxDischargeRate != 0.0 else None
+    sa.slowUnloadTime = asset.capacity / (asset.maxDischargeRate * 3600) if asset.maxDischargeRate != 0.0 else None
+    sa.chargeEfficiency = asset.chargeEfficiency  # for charger Effect
+    sa.disChargeEfficiency = asset.dischargeEfficiency  # for discharger Effect
+    # self distchargeRate (J/s * 3600) = J/h
+    # Verlies per uur is in PJ/uur?
+    sa.lossesPerHour = convert_to_unit(asset.selfDischargeRate * 3600, ENERGY_IN_J, ENERGY_IN_PJ)  # for storage
+
+    return sa
 
 
 def extract_singlevalue(profile: esdl.GenericProfile) -> Optional[float]:
@@ -133,25 +196,31 @@ def extract_efficiency(asset: esdl.EnergyAsset) -> float:
     else:
         return 1.0
 
+
 def extract_costs(asset: esdl.EnergyAsset):
     o_m_cost_normalized = None
     investment_costs_normalized = None
     marginal_cost_normalized = None
+    variable_om_costs_normalized = None
     costinfo: esdl.CostInformation = asset.costInformation
     if costinfo:
-        o_m_costs_profile:esdl.GenericProfile = costinfo.fixedOperationalAndMaintenanceCosts
-        if o_m_costs_profile:
-            o_m_costs = extract_singlevalue(o_m_costs_profile)
-            o_m_cost_normalized = convert_to_unit(o_m_costs, o_m_costs_profile.profileQuantityAndUnit, COST_IN_MEur)
         investment_costs_profile: esdl.GenericProfile = costinfo.investmentCosts
         if investment_costs_profile:
             investment_costs = extract_singlevalue(investment_costs_profile)
-            investment_costs_normalized = convert_to_unit(investment_costs, investment_costs_profile.profileQuantityAndUnit, COST_IN_MEur)
+            investment_costs_normalized = convert_to_unit(investment_costs, investment_costs_profile.profileQuantityAndUnit, COST_IN_MEur_per_GW)
+        o_m_costs_profile:esdl.GenericProfile = costinfo.fixedOperationalAndMaintenanceCosts
+        if o_m_costs_profile:
+            o_m_costs = extract_singlevalue(o_m_costs_profile)
+            o_m_cost_normalized = convert_to_unit(o_m_costs, o_m_costs_profile.profileQuantityAndUnit, COST_IN_MEur_per_GW_per_year)
+        variable_om_costs_profile = costinfo.variableOperationalAndMaintenanceCosts
+        if variable_om_costs_profile:
+            variable_om_costs = extract_singlevalue(variable_om_costs_profile)
+            variable_om_costs_normalized = convert_to_unit(variable_om_costs, variable_om_costs_profile.profileQuantityAndUnit, COST_IN_MEur_per_PJ)
         marginal_cost_profile: esdl.GenericProfile = costinfo.marginalCosts
         if marginal_cost_profile:
             marginal_cost = extract_singlevalue(marginal_cost_profile)
             marginal_cost_normalized = convert_to_unit(marginal_cost, marginal_cost_profile.profileQuantityAndUnit, COST_IN_Eur_per_MWh)
-    return o_m_cost_normalized, investment_costs_normalized, marginal_cost_normalized
+    return investment_costs_normalized, o_m_cost_normalized, variable_om_costs_normalized, marginal_cost_normalized
 
 
 def extract_carriers(asset: esdl.EnergyAsset) -> Tuple[List[str], List[str]]:
@@ -167,6 +236,7 @@ def extract_carriers(asset: esdl.EnergyAsset) -> Tuple[List[str], List[str]]:
                 carrier_out_list.append(p.carrier.name)
 
     return carrier_in_list, carrier_out_list
+
 
 def extract_port_singlevalue_profiles(asset: esdl.EnergyAsset, target_unit:esdl.QuantityAndUnitType) -> Tuple[List[str], List[str]]:
     ports = asset.port
@@ -189,14 +259,13 @@ def extract_port_singlevalue_profiles(asset: esdl.EnergyAsset, target_unit:esdl.
     return singlevalue_in_list, singlevalue_out_list
 
 
-
 def find_opera_equivalent(asset: esdl.EnergyAsset) -> str | None:
     if isinstance(asset, esdl.Electrolyzer):
         return "H2 Large-scale electrolyser"
     elif isinstance(asset, esdl.MobilityDemand):
         # todo check for carrier
         md: esdl.MobilityDemand = asset
-        if md.fuelType == esdl.MobilityFuelTypeEnum.HYDROGEN:
+        if md.fuelType and md.fuelType == esdl.MobilityFuelTypeEnum.HYDROGEN:
             if esdl.VehicleTypeEnum.CAR in md.type:
                 return " H2 auto"  # mind the space
             elif esdl.VehicleTypeEnum.VAN in md.type:
@@ -204,7 +273,7 @@ def find_opera_equivalent(asset: esdl.EnergyAsset) -> str | None:
             elif esdl.VehicleTypeEnum.TRUCK in md.type:
                 return "H2 truck with energy consumption reduction"
         else:
-            return "REF Finale vraag verkeer th" # not sure if this is ok, as it is Final demand...
+            return "REF Finale vraag verkeer th"  # not sure if this is ok, as it is Final demand...
     elif isinstance(asset, esdl.GasConversion):
         gconv: esdl.GasConversion = asset
         if gconv.type == esdl.GasConversionTypeEnum.SMR:
@@ -246,6 +315,13 @@ def find_opera_equivalent(asset: esdl.EnergyAsset) -> str | None:
     elif isinstance(asset, esdl.Export):
         # TODO: adapt to carriers as with import
         return "H2 domestic to export"
+    elif isinstance(asset, esdl.PowerPlant):
+        asset:esdl.PowerPlant
+        if asset.fuel == esdl.PowerPlantFuelEnum.URANIUM:
+            return "Nuclear energy Gen IV - Electricity production"
+        else:
+            print(f"Cannot map {asset.name} to an Opera equivalent")
+            return None
     else:
         print(f"Cannot map {asset.name} to an Opera equivalent")
         return None

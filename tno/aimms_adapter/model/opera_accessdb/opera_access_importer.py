@@ -63,6 +63,12 @@ class OperaAccessImporter:
         self.conn.close()
 
     def start_import(self, esdl_data_frame: pd.DataFrame, access_database: str):
+        """
+        Connects to database file and uses esdl-dataframe to create opera database
+        :param esdl_data_frame:
+        :param access_database:
+        :return:
+        """
         self.df = esdl_data_frame
         is_consumer = self.df['category'] == 'Consumer'
         self.not_consumer_options = self.df[~is_consumer]
@@ -144,7 +150,7 @@ class OperaAccessImporter:
             else:
                 print(f"{activiteiten_name} already in [Activiteiten]")
 
-            # TODO: add to ActiviteitBaseline(activiteit,scenario,jaar) the annual demand
+            # add to ActiviteitBaseline(activiteit,scenario,jaar) the annual demand
             sql = "SELECT * FROM [ActiviteitBaseline(activiteit,scenario,jaar)] WHERE [Activiteit] = '{}' AND [Scenario] = '{}' AND [Jaar] = {}" \
                 .format(activiteiten_name, self.scenario, self.year)
             df = psql.read_sql(sql, self.engine)
@@ -170,36 +176,70 @@ class OperaAccessImporter:
             ref_option_name = row.opera_equivalent
             if df.shape[0] == 0:  # Case where new option is NOT in table 'Opties'
                 print(f'Adding {new_opt} to [Opties]')
-
-                sql = "SELECT * FROM [Opties] WHERE [Naam optie] = '{}'".format(ref_option_name)
-                df_ref_option = psql.read_sql(sql, self.engine)
-                # TODO: if no ref_option found, create row ourselves
-                df_ref_option = df_ref_option.drop('Nr', axis=1)
-                df_ref_option['Naam optie'] = '{}'.format(new_opt)
-                df_ref_option['Sector'] = 'Energie'  # use an unused sector in opera for now (see Sectoren table)
-                if row['category'] == 'Consumer':
-                    df_ref_option['Unit of Capacity'] = '{}'.format('PJ')
-                    df_ref_option['Eenheid activiteit'] = '{}'.format('PJ')
-                    df_ref_option['Cap2Act'] = 1 # Cap2Act is a number in DB
-                    df_ref_option['Optie onbeperkt'] = True
-                    df_ref_option['Capaciteit onbeperkt'] = True
-
+                if row['category'] == 'Storage':
+                    self._add_storage(row)
                 else:
-                    df_ref_option['Unit of Capacity'] = '{}'.format('GW')
-                    df_ref_option['Eenheid activiteit'] = '{}'.format('PJ')
-                    df_ref_option['Cap2Act'] = 31.536
-                col = [[i] for i in df_ref_option.columns]
 
-                self.cursor.executemany(
-                    'INSERT INTO [Opties] ({}) VALUES ({}{})'.format(str(col)[1:-1],
-                                                                     '?,' * (len(df_ref_option.columns) - 1),
-                                                                     '?').replace("'", ""),
-                    list(df_ref_option.itertuples(index=False, name=None)))
+                    sql = "SELECT * FROM [Opties] WHERE [Naam optie] = '{}'".format(ref_option_name)
+                    df_ref_option = psql.read_sql(sql, self.engine)
+                    if df_ref_option.empty:
+                        # TODO: if no ref_option found, create row ourselves
+                        print(f"There is no Opera equivalent defined for {new_opt}, ignoring.")
+                        continue
+                    df_ref_option = df_ref_option.drop('Nr', axis=1)
+                    df_ref_option['Naam optie'] = '{}'.format(new_opt)
+                    df_ref_option['Sector'] = 'Energie'  # use an unused sector in opera for now (see Sectoren table)
+                    if row['category'] == 'Consumer':
+                        df_ref_option['Unit of Capacity'] = 'PJ'
+                        df_ref_option['Eenheid activiteit'] = 'PJ'
+                        df_ref_option['Cap2Act'] = 1 # Cap2Act is a number in DB
+                        df_ref_option['Optie onbeperkt'] = True
+                        df_ref_option['Capaciteit onbeperkt'] = True
+                    else:
+                        df_ref_option['Unit of Capacity'] = 'GW'
+                        df_ref_option['Eenheid activiteit'] = 'PJ'
+                        df_ref_option['Cap2Act'] = 31.536
+                    col = [[i] for i in df_ref_option.columns]
 
-            else:
+                    self.cursor.executemany(
+                        'INSERT INTO [Opties] ({}) VALUES ({}{})'.format(str(col)[1:-1],
+                                                                         '?,' * (len(df_ref_option.columns) - 1),
+                                                                         '?').replace("'", ""),
+                        list(df_ref_option.itertuples(index=False, name=None)))
+            else: # option already in Opties table
                 print(f"{new_opt} ({df.Nr.values}) already in [Opties]")
 
         self.conn.commit()
+
+    def _add_storage(self, row: pd.Series):
+        # for storage 3 options are required: the storage itself, which has the same name as the asset name
+        # the charger, which is postfixed with _charger
+        # the discharger, which is postfixed with _discharger
+        chargerName = f"{row['name']}_charger"
+        dischargerName = f"{row['name']}_discharger"
+        # assumption here is that if the storage is not in the options, the other 2 are also not there otherwise
+        # we should check here
+        # do we need to set value for: Optie onbeperkt, Landelijk beperkt, Capaciteit onbeperkt, Flexibel?
+
+        config_storage = {'Unit of Capacity': 'PJ'}
+        sql = f"INSERT INTO [Opties] ([Naam optie], [Unit of Capacity], [Eenheid activiteit], [Cap2Act], [Sector], " \
+              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie]) VALUES (" \
+              f"'{row['name']}', 'PJ', 'PJ', 1, '{self.default_sector}', {False}, {False}, {True})"
+        print(sql)
+        storage_id = self.cursor.execute(sql)
+        sql = f"INSERT INTO [Opties] ([Naam optie], [Unit of Capacity], [Eenheid activiteit], [Cap2Act], [Sector], " \
+              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie]) VALUES (" \
+              f"'{chargerName}', 'GW', 'PJ', {31.536}, '{self.default_sector}', {True}, {False}, {False})"
+        charger_id = self.cursor.execute(sql)
+        sql = f"INSERT INTO [Opties] ([Naam optie], [Unit of Capacity], [Eenheid activiteit], [Cap2Act], [Sector], " \
+              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie]) VALUES (" \
+              f"'{dischargerName}', 'GW', 'PJ', {31.536}, '{self.default_sector}', {False}, {True}, {False})"
+        discharger_id = self.cursor.execute(sql)
+
+        print(f"storage_id: {storage_id}, charger_id={charger_id}, discharger_id={discharger_id}")
+
+
+
 
     def _update_option_related_tables(self):
         # add column to self.df with Optie number (Nr)
@@ -376,3 +416,5 @@ class OperaAccessImporter:
             # It is crucial that the table 'OptieActiviteit' connect (match) the number of the included Options and an Activiteit (demand) in OPERA
 
         self.conn.commit()
+
+
