@@ -13,8 +13,8 @@ pd.set_option('display.width', 200)
 # current asset types that are not supported by this parser or Opera import
 IGNORED_ASSETS_TUPLE = (esdl.Transport, esdl.Import, esdl.Export)
 
-class OperaESDLParser:
 
+class OperaESDLParser:
     def __init__(self):
         self.esh = EnergySystemHandler()
 
@@ -29,9 +29,9 @@ class OperaESDLParser:
         """
         print(f"Power unit : {POWER_IN_GW.description}")
         print(f"Energy unit: {ENERGY_IN_PJ.description}")
-        print(f"CAPEX Cost unit: {COST_IN_MEur_per_GW}")
-        print(f"OPEX Cost unit: {COST_IN_MEur_per_GW_per_year}")
-        print(f"Variable OPEX Cost unit: {COST_IN_MEur_per_PJ}")
+        print(f"CAPEX Cost unit: {COST_IN_MEur_per_GW.description}")
+        print(f"OPEX Cost unit: {COST_IN_MEur_per_GW_per_year.description}")
+        print(f"Variable OPEX Cost unit: {COST_IN_MEur_per_PJ.description}")
         print(f"Marginal Cost unit: {COST_IN_Eur_per_MWh.description}")
 
         self.esh.load_from_string(esdl_string)
@@ -71,15 +71,15 @@ class OperaESDLParser:
                     category = esdl_category(asset)
 
                     power_range, unit = extract_range(asset, 'power')
-                    print("\t- Power range: ", power_range)
                     if power_range:
+                        print("\t- Power range: ", power_range)
                         power_range = tuple([convert_to_unit(v, unit, POWER_IN_GW) for v in power_range])
                     if hasattr(asset, 'power'):
                         max_power = convert_to_unit(asset.power, POWER_IN_W, POWER_IN_GW) if asset.power else None
 
                     capacity_range, unit = extract_range(asset, 'capacity')
-                    print("\t- Capacity range: ", power_range)
                     if capacity_range:
+                        print("\t- Capacity range: ", capacity_range)
                         # a bit of a hack to use power range instead of capacity range (with diferent Unit)
                         power_range = tuple([convert_to_unit(v, unit, ENERGY_IN_PJ) for v in capacity_range])
 
@@ -315,13 +315,13 @@ def find_opera_equivalent(asset: esdl.EnergyAsset) -> str | None:
     elif isinstance(asset, esdl.Export):
         # TODO: adapt to carriers as with import
         return "H2 domestic to export"
-    elif isinstance(asset, esdl.PowerPlant):
-        asset:esdl.PowerPlant
-        if asset.fuel == esdl.PowerPlantFuelEnum.URANIUM:
-            return "Nuclear energy Gen IV - Electricity production"
-        else:
-            print(f"Cannot map {asset.name} to an Opera equivalent")
-            return None
+    # elif isinstance(asset, esdl.PowerPlant):
+    #     asset:esdl.PowerPlant
+    #     if asset.fuel == esdl.PowerPlantFuelEnum.URANIUM:
+    #         return "Nuclear energy Gen IV - Electricity production"
+    #     else:
+    #         print(f"Cannot map {asset.name} to an Opera equivalent")
+    #         return None
     else:
         print(f"Cannot map {asset.name} to an Opera equivalent")
         return None

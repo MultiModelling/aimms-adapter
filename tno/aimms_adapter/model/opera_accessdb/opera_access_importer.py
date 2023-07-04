@@ -1,4 +1,6 @@
 import shutil
+from enum import Enum
+from typing import TypedDict
 
 import pandas as pd
 import pandas.io.sql as psql
@@ -11,6 +13,19 @@ log = get_logger(__name__)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 200)
 
+
+class StorageType(Enum):
+    STORAGE = 0
+    CHARGER = 1
+    DISCHARGER = 2
+
+class OperaStorageOption(TypedDict):
+    name: str
+    nr: int
+    type: StorageType
+
+def not_empty(value):
+    return not (value is None or pd.isna(value) or str(value).strip() == '')
 
 def opera_energycarrier(carrier):
     if pd.isna(carrier):
@@ -179,20 +194,18 @@ class OperaAccessImporter:
                 if row['category'] == 'Storage':
                     self._add_storage(row)
                 else:
-
                     sql = "SELECT * FROM [Opties] WHERE [Naam optie] = '{}'".format(ref_option_name)
                     df_ref_option = psql.read_sql(sql, self.engine)
                     if df_ref_option.empty:
-                        # TODO: if no ref_option found, create row ourselves
-                        print(f"There is no Opera equivalent defined for {new_opt}, ignoring.")
-                        continue
+                        print(f"#######################      There is no Opera equivalent defined for {new_opt}, creating a new one!  ###################")
+                        df_ref_option = pd.DataFrame([{'Nr': 1}])  # create dataframe with one row.
                     df_ref_option = df_ref_option.drop('Nr', axis=1)
                     df_ref_option['Naam optie'] = '{}'.format(new_opt)
                     df_ref_option['Sector'] = 'Energie'  # use an unused sector in opera for now (see Sectoren table)
                     if row['category'] == 'Consumer':
                         df_ref_option['Unit of Capacity'] = 'PJ'
                         df_ref_option['Eenheid activiteit'] = 'PJ'
-                        df_ref_option['Cap2Act'] = 1 # Cap2Act is a number in DB
+                        df_ref_option['Cap2Act'] = 1  # Cap2Act is a number in DB
                         df_ref_option['Optie onbeperkt'] = True
                         df_ref_option['Capaciteit onbeperkt'] = True
                     else:
@@ -200,18 +213,20 @@ class OperaAccessImporter:
                         df_ref_option['Eenheid activiteit'] = 'PJ'
                         df_ref_option['Cap2Act'] = 31.536
                     col = [[i] for i in df_ref_option.columns]
-
-                    self.cursor.executemany(
-                        'INSERT INTO [Opties] ({}) VALUES ({}{})'.format(str(col)[1:-1],
-                                                                         '?,' * (len(df_ref_option.columns) - 1),
-                                                                         '?').replace("'", ""),
-                        list(df_ref_option.itertuples(index=False, name=None)))
+                    sql = 'INSERT INTO [Opties] ({}) VALUES ({}{})'.format(str(col)[1:-1],
+                            '?,' * (len(df_ref_option.columns) - 1), '?').replace("'", "")
+                    values = list(df_ref_option.itertuples(index=False, name=None))
+                    print(sql)
+                    print(values)
+                    self.cursor.executemany(sql, values)
             else: # option already in Opties table
                 print(f"{new_opt} ({df.Nr.values}) already in [Opties]")
 
         self.conn.commit()
 
     def _add_storage(self, row: pd.Series):
+
+        lifetime = 10 # years
         # for storage 3 options are required: the storage itself, which has the same name as the asset name
         # the charger, which is postfixed with _charger
         # the discharger, which is postfixed with _discharger
@@ -223,29 +238,194 @@ class OperaAccessImporter:
 
         config_storage = {'Unit of Capacity': 'PJ'}
         sql = f"INSERT INTO [Opties] ([Naam optie], [Unit of Capacity], [Eenheid activiteit], [Cap2Act], [Sector], " \
-              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie]) VALUES (" \
-              f"'{row['name']}', 'PJ', 'PJ', 1, '{self.default_sector}', {False}, {False}, {True})"
+              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie], [Levensduur]) VALUES (" \
+              f"'{row['name']}', 'PJ', 'PJ', 1, '{self.default_sector}', {False}, {False}, {True}, {lifetime})"
         print(sql)
-        storage_id = self.cursor.execute(sql)
+        self.cursor.execute(sql)
+        storage_id = self.cursor.execute("SELECT @@Identity").fetchone()[0]
         sql = f"INSERT INTO [Opties] ([Naam optie], [Unit of Capacity], [Eenheid activiteit], [Cap2Act], [Sector], " \
-              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie]) VALUES (" \
-              f"'{chargerName}', 'GW', 'PJ', {31.536}, '{self.default_sector}', {True}, {False}, {False})"
-        charger_id = self.cursor.execute(sql)
+              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie], [Levensduur]) VALUES (" \
+              f"'{chargerName}', 'GW', 'PJ', {31.536}, '{self.default_sector}', {True}, {False}, {False}, {lifetime})"
+        self.cursor.execute(sql)
+        charger_id = self.cursor.execute("SELECT @@Identity").fetchone()[0]
         sql = f"INSERT INTO [Opties] ([Naam optie], [Unit of Capacity], [Eenheid activiteit], [Cap2Act], [Sector], " \
-              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie]) VALUES (" \
-              f"'{dischargerName}', 'GW', 'PJ', {31.536}, '{self.default_sector}', {False}, {True}, {False})"
-        discharger_id = self.cursor.execute(sql)
+              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie], [Levensduur]) VALUES (" \
+              f"'{dischargerName}','GW', 'PJ', {31.536}, '{self.default_sector}', {False}, {True}, {False}, {lifetime})"
+        self.cursor.execute(sql)
+        discharger_id = self.cursor.execute("SELECT @@Identity").fetchone()[0]
 
         print(f"storage_id: {storage_id}, charger_id={charger_id}, discharger_id={discharger_id}")
+        self.conn.commit()
+        storage_option: OperaStorageOption = {'name': row['name'], 'nr': storage_id, 'type': StorageType.STORAGE}
+        charger_option: OperaStorageOption = {'name': chargerName, 'nr': charger_id, 'type': StorageType.CHARGER}
+        discharger_option: OperaStorageOption = {'name': dischargerName, 'nr': discharger_id, 'type': StorageType.DISCHARGER}
+        opera_storage_options = [storage_option, charger_option, discharger_option]
+
+        for optie in opera_storage_options:
+            sql = "SELECT * FROM [Beschikbare varianten] WHERE [Nr] = {}".format(optie['nr'])
+            df = psql.read_sql(sql, self.engine)
+
+            if df.shape[0] == 0:  # Case where new option is NOT in table 'Beschikbare varianten'
+                print(f"Adding new option {optie['name']} to [Beschikbare varianten]")
+                # insert using defaults
+                q = f"INSERT INTO [Beschikbare varianten] ([Nr], [Variant], [Beschikbaar]) VALUES ({optie['nr']}, 1, 1)"
+                self.cursor.execute(q)
+            else:
+                print(f"Option {optie['nr']}/{optie['name']} is already in [Beschikbare varianten]")
+                print(df)
+        self.conn.commit()
+
+        # Define flows in OpgelegdeToegestaneFlows
+        # manual for charger -> storage and for storage -> discharger
+        input_energiedrager = row['carrier_in']
+        opera_energiedrager = opera_energycarrier(input_energiedrager)
+        sql = "SELECT * FROM [OpgelegdeToegestaneFlows] WHERE [OptieVan] = {}".format(charger_option['nr'])
+        df = psql.read_sql(sql, self.engine)
+        if df.shape[0] == 0:  # Case where flow is NOT in table 'OpgelegdeToegestaneFlows'
+            print(f"Adding new flow {charger_option['name']}->{storage_option['name']} to [OpgelegdeToegestaneFlows]")
+            # insert using defaults
+            opmerking = "Storage: Charger -> storage"
+            q = f"INSERT INTO [OpgelegdeToegestaneFlows] ([Energiedrager], [OptieVan], [OptieNaar], [Match], [Opmerking]) " \
+                f" VALUES ('{opera_energiedrager}', {charger_option['nr']}, {storage_option['nr']}, 1, '{opmerking}')"
+            self.cursor.execute(q)
+        else:
+            print(f"Flow {charger_option['name']}->{storage_option['name']} is already in [OpgelegdeToegestaneFlows]")
+        self.conn.commit()
+
+        sql = "SELECT * FROM [OpgelegdeToegestaneFlows] WHERE [OptieVan] = {}".format(storage_option['nr'])
+        df = psql.read_sql(sql, self.engine)
+        if df.shape[0] == 0:  # Case where flow is NOT in table 'OpgelegdeToegestaneFlows'
+            print(f"Adding new flow {storage_option['name']}->{discharger_option['name']} to [OpgelegdeToegestaneFlows]")
+            # insert using defaults
+            opmerking = "Storage: Storage -> Discharger"
+            q = f"INSERT INTO [OpgelegdeToegestaneFlows] ([Energiedrager], [OptieVan], [OptieNaar], [Match], [Opmerking]) " \
+                f" VALUES ('{opera_energiedrager}', {storage_option['nr']}, {discharger_option['nr']}, 1, '{opmerking}')"
+            self.cursor.execute(q)
+        else:
+            print(f"Flow {storage_option['name']}->{discharger_option['name']} is already in [OpgelegdeToegestaneFlows]")
+        self.conn.commit()
+
+        # energiedrageraloc [EnergieDragerAlloc(Optie,Energiedrager,Var,ConstrJaar,Jaar)]
+        for optie in opera_storage_options:
+            sql = "SELECT * FROM [EnergieDragerAlloc(Optie,Energiedrager,Var,ConstrJaar,Jaar)] WHERE [Nr] = {}".format(optie['nr'])
+            df = psql.read_sql(sql, self.engine)
+            if df.shape[0] == 0:  # Case where flow is NOT in table 'OpgelegdeToegestaneFlows'
+                print(f"Adding Effect of {optie['name']} to [EnergieDragerAlloc(Optie,Energiedrager,Var,ConstrJaar,Jaar)]")
+                effect = -1
+                if optie['type'] == StorageType.CHARGER:
+                    effect = 1
+
+                # todo if e.g. compression energy (electricity) is used when charging, add extra energiedrager with the consumption of this energy as Effect
+                # todo: in esdl.InputOutputBehavior is used here, use that.
+                # todo: constructiejaar is now hardcoded and same as self.year
+
+                q = f"INSERT INTO [EnergieDragerAlloc(Optie,Energiedrager,Var,ConstrJaar,Jaar)] ([Nr], [Energiedrager], [Variant], [ConstructieJaar], [Jaar], [Effect]) " \
+                    f" VALUES (" \
+                    f"{optie['nr']}, '{opera_energiedrager}', 1, {self.year}, {self.year}, {effect}" \
+                    f")"
+                self.cursor.execute(q)
+            else:
+                print(f"Effect of {optie['name']} is already in [EnergieDragerAlloc(Optie,Energiedrager,Var,ConstrJaar,Jaar)]")
+
+            # add Efficiency to [TechnischeParameters(Optie,Jaar)]
+            sql = "SELECT * FROM [TechnischeParameters(Optie,Jaar)] WHERE [Nr] = {}".format(optie['nr'])
+            df = psql.read_sql(sql, self.engine)
+            if df.shape[0] == 0:  # Case where flow is NOT in table 'OpgelegdeToegestaneFlows'
+                print(f"Adding efficiency of {optie['name']} to [TechnischeParameters(Optie,Jaar)]")
+                efficiency = 1
+                if optie['type'] == StorageType.CHARGER:
+                    efficiency = row['storage_charge_efficiency'] if not_empty(row['storage_charge_efficiency']) else 1
+                if optie['type'] == StorageType.STORAGE:
+                    efficiency = row['efficiency'] if not_empty(row['efficiency']) else 1
+                if optie['type'] == StorageType.DISCHARGER:
+                    efficiency = row['storage_discharge_efficiency'] if not_empty(row['storage_discharge_efficiency']) else 1
+                q = f"INSERT INTO [TechnischeParameters(Optie,Jaar)] ([Nr], [Jaar], [AvailabilityFactor], [Rendement]) " \
+                    f" VALUES (" \
+                    f"{optie['nr']}, {self.year}, 0.99, {efficiency}" \
+                    f")"
+                self.cursor.execute(q)
+            else:
+                print(f"Efficiency of {optie['name']} is already in [TechnischeParameters(Optie,Jaar)]")
+            self.conn.commit()
+
+            # add storage options to ([OpslagOpties(Optie,ConstrJr)]
+            sql = "SELECT * FROM [OpslagOpties(Optie,ConstrJr)] WHERE [Nr] = {}".format(optie['nr'])
+            df = psql.read_sql(sql, self.engine)
+            if df.shape[0] == 0:  # Case where flow is NOT in table 'OpgelegdeToegestaneFlows'
+                print(f"Adding storage options of {optie['name']} to [OpslagOpties(Optie,ConstrJr)]")
+                verliesperuur = 'Null' # check if None works or 0
+                slowloadtime = 'Null'
+                fastloadtime = 'Null'
+                if optie['type'] == StorageType.CHARGER:
+                    slowloadtime = row['storage_slow_loadtime'] if not_empty(row['storage_slow_loadtime']) else 1
+                    fastloadtime = row['storage_fast_loadtime'] if not_empty(row['storage_fast_loadtime']) else 1
+                if optie['type'] == StorageType.STORAGE:
+                    verliesperuur = row['storage_losses_perhour'] if not_empty(row['storage_losses_perhour']) else 0
+                if optie['type'] == StorageType.DISCHARGER:
+                    slowloadtime = row['storage_slow_unloadtime'] if not_empty(row['storage_slow_unloadtime']) else 1
+                    fastloadtime = row['storage_fast_unloadtime'] if not_empty(row['storage_fast_unloadtime']) else 1
+                q = f"INSERT INTO [OpslagOpties(Optie,ConstrJr)] ([Nr], [ConstructieJaar], [VerliesPerUur], [SlowLoadTime], [FastLoadTime]) " \
+                    f" VALUES (" \
+                    f"{optie['nr']}, {self.year}, {verliesperuur}, {slowloadtime}, {fastloadtime}" \
+                    f")"
+                print(q)
+                self.cursor.execute(q)
+            else:
+                print(f"Storage options for {optie['name']} is already in [OpslagOpties(Optie,ConstrJr)]")
+            self.conn.commit()
 
 
+        # add Kosten, only to storage medium ([OpslagOpties(Optie,ConstrJr)] (battery for now only)
+        # todo: for hydrogen, all options have cost (charger, discharger)
+        sql = "SELECT * FROM [Kosten(Optie,Variant,Jaar)] WHERE [Nr] = {} AND [Jaar] = '{}'".format(
+            storage_option['nr'],  self.year)
+        df = psql.read_sql(sql, self.engine)
+        if df.shape[0] == 0:  # Case where no kost for this option
+            print(f"Adding Cost for {storage_option['name']} to [Kosten(Optie,Variant,Jaar)]")
+            investerings_kosten = row['investment_cost'] if not_empty(row['investment_cost']) else 0.0
+            om_kosten = row['o_m_cost'] if not_empty(row['o_m_cost']) else 0.0
+            variable_kosten = row['variable_o_m_cost'] if not_empty(row['variable_o_m_cost']) else 0.0
+            q = f"INSERT INTO [Kosten(Optie,Variant,Jaar)] ([Nr], [Variant], [Jaar], [InvesteringsKosten], [Overig operationeel kosten/baten], [Variabele kosten]) " \
+                f" VALUES (" \
+                f"{storage_option['nr']}, 1, {self.year}, {investerings_kosten}, {om_kosten}, {variable_kosten}" \
+                f")"
+            self.cursor.execute(q)
+        else:
+            print(f"Cost for {storage_option['name']} is already in [Kosten(Optie,Variant,Jaar)]")
+        self.conn.commit()
 
+        # OptieNetwerken not used for now, as we currently don't use the EnergyNetworks in Opera (e.g. HS, MS, LS, HHD, HLD)
+
+        ## Add option to CatJaarScen table to set capacity ranges for storage options (not charge and discharger)
+        sql = "SELECT * FROM [CatJaarScen(categorie,jaar,scenario)] WHERE [Categorie] = '{}' AND [Jaar] = '{}' AND [Scenario] = '{}'".format(
+            storage_id, self.year, self.scenario)
+        df = psql.read_sql(sql, self.engine)
+        if df.shape[0] == 0:  # Case where new option is NOT in table 'CatJaarScen'
+            print(f"Adding new CatJaarScen for optie {storage_id}/{storage_option['name']}")
+            max_capacity = row['power_max'] if not pd.isna(row['power_max']) else 0  # None
+            min_capacity = row['power_min'] if not pd.isna(row['power_min']) else 0
+            # currently not filling in columns [Max aantal], [Max kosten], [Min aantal], [Min kosten],
+            sql = f'INSERT INTO [CatJaarScen(categorie,jaar,scenario)] ([Categorie], [Jaar], [Scenario], [Max totale capaciteit], [Min totale capaciteit]) ' \
+                  f"VALUES ('{storage_id}', '{self.year}', '{self.scenario}', {max_capacity}, {min_capacity});"
+            self.cursor.execute(sql)
+            self.conn.commit()
+        else:
+            print(f"Option {storage_id}/{storage_option['name']} is already present in [CatJaarScen(categorie,jaar,scenario)] with scenario {self.scenario}")
+
+    def _update_storage_related_tables(self, row: pd.Series):
+        pass
 
     def _update_option_related_tables(self):
         # add column to self.df with Optie number (Nr)
         self.df['Nr'] = 0
         for index, row in self.df.iterrows():
+            if row['category'] == 'Storage':
+                #self._update_storage_related_tables(row)
+                continue  # already handled in _add_storage()
+            #else:
+            #    continue  # skip storage in this method, handled in _update_storage_related_tables()
             new_opt = row['name']
+            print("Updating related tables for option:", new_opt)
             ref_option_name = row.opera_equivalent
             sql = "SELECT * FROM [Opties] WHERE [Naam optie] = '{}'".format(new_opt)
             df_optie = psql.read_sql(sql, self.engine)
@@ -294,40 +474,52 @@ class OperaAccessImporter:
             sql = "SELECT * FROM [Kosten(Optie,Variant,Jaar)] WHERE [Nr] = {} AND [Jaar] = '{}'".format(new_optie_nr,
                                                                                                         self.year)
             df = psql.read_sql(sql, self.engine)
-            if df.shape[0] == 0:  # Case where new option is NOT in table 'Kosten'
-                investment_cost = row['investment_cost'] if not pd.isna(row['investment_cost']) else 0.0
-                o_m_cost = row['o_m_cost'] if not pd.isna(row['o_m_cost']) else 0.0
+
+            investment_cost = row['investment_cost'] if not_empty(row['investment_cost']) else 0.0
+            o_m_cost = row['o_m_cost'] if not_empty(row['o_m_cost']) else 0.0
+            variable_cost = row['variable_o_m_cost'] if not_empty(row['variable_o_m_cost']) else 0.0
+            no_costs_defined = investment_cost == 0.0 and o_m_cost == 0.0 and variable_cost == 0.0
+
+            if df.shape[0] == 0 and not no_costs_defined:  # Case where new option is NOT in table 'Kosten'
                 if df_ref_option is not None:
                     sql = "SELECT * FROM [Kosten(Optie,Variant,Jaar)] WHERE [Nr] = {} AND [Jaar] = '{}'".format(
                         int(df_ref_option.Nr),
                         self.year)
                     df3 = psql.read_sql(sql, self.engine)
+                    if df3.empty: # if no costs are found for reference option, create new
+                        df3 = pd.DataFrame({'Nr': new_optie_nr, 'Variant': 1, 'Jaar': self.year})
+                    print(df3)
                     df3.Nr = df_optie.Nr
                     df3['Investeringskosten'] = float(investment_cost)
                     df3['Overig operationeel kosten/baten'] = float(o_m_cost)
+                    df3['Variabele kosten'] = float(variable_cost)
                     # Do we need to add more costs (?)
                     col = [[i] for i in df3.columns]
 
-                    self.cursor.executemany(
-                        'INSERT INTO [Kosten(Optie,Variant,Jaar)] ({}) VALUES ({}{})'.format(str(col)[1:-1], '?,' * (
-                                len(df3.columns) - 1), '?').replace("'", ""),
-                        list(df3.itertuples(index=False, name=None)))
+                    sql = 'INSERT INTO [Kosten(Optie,Variant,Jaar)] ({}) VALUES ({}{})'.format(str(col)[1:-1], '?,' * (
+                                len(df3.columns) - 1), '?').replace("'", "")
+                    values = list(df3.itertuples(index=False, name=None))
+                    print(sql)
+                    print(values)
+                    self.cursor.executemany(sql, values)
                 else:
-                    # TODO add overige kosten of variabele kosten?
-                    q = f'INSERT INTO [Kosten(Optie,Variant,Jaar)] (Nr, Variant, Jaar, Investeringskosten, Overig operationeel kosten/baten) ' \
-                        f'VALUES ({new_optie_nr}, 1, {self.year}, {float(investment_cost)}, {float(o_m_cost)})'
+                    # TODO add overige kosten?
+                    q = f'INSERT INTO [Kosten(Optie,Variant,Jaar)] ([Nr], [Variant], [Jaar], [Investeringskosten], [Overig operationeel kosten/baten], [Variabele kosten]) ' \
+                        f'VALUES ({new_optie_nr}, 1, {self.year}, {float(investment_cost)}, {float(o_m_cost)}, {float(variable_cost)})'
                     self.cursor.execute(q)
                 self.conn.commit()
             else:
-                print(
-                    f'Option {df_optie.Nr.values}/{new_opt} has already costs attached in [Kosten(Optie,Variant,Jaar)]')
-                print(df)
+                if no_costs_defined:
+                    print(f"All costs are empty for {df_optie.Nr.values}/{new_opt}, not adding to [Kosten(Optie,Variant,Jaar)]")
+                else:
+                    print(f'Option {df_optie.Nr.values}/{new_opt} has already costs attached in [Kosten(Optie,Variant,Jaar)]')
+                    print(df)
 
             # Add option to Energiegebruik table, update efficiency in  Effect column (x unit required for 1 unit of output)
             # first input carriers
-            carrier_in = row['carrier_in']
-            if carrier_in is not None and carrier_in:
-                carrier_in = opera_energycarrier(carrier_in)  # convert to Opera version of this ESDL carrier
+            esdl_carrier_in = row['carrier_in']
+            if esdl_carrier_in is not None and esdl_carrier_in:
+                carrier_in = opera_energycarrier(esdl_carrier_in)  # convert to Opera version of this ESDL carrier
                 sql = "SELECT * FROM [Energiegebruik(Optie,Energiedrager,Variant,Jaar)] WHERE [Nr] = {} AND [Jaar] = '{}' AND [Energiedrager] = '{}'".format(
                     new_optie_nr, self.year, carrier_in)
                 df = psql.read_sql(sql, self.engine)
@@ -363,9 +555,11 @@ class OperaAccessImporter:
                 new_optie_nr, self.year, self.scenario)
             df = psql.read_sql(sql, self.engine)
             if df.shape[0] == 0:  # Case where new option is NOT in table 'CatJaarScen'
-                sql = "SELECT * FROM [CatJaarScen(categorie,jaar,scenario)] WHERE [Categorie] = '{}' AND [Jaar] = '{}' AND [Scenario] = '{}'".format(
-                    int(df_ref_option.Nr), self.year, self.scenario)
-                df3 = psql.read_sql(sql, self.engine)
+                df3 = pd.DataFrame()
+                if df_ref_option is not None:
+                    sql = "SELECT * FROM [CatJaarScen(categorie,jaar,scenario)] WHERE [Categorie] = '{}' AND [Jaar] = '{}' AND [Scenario] = '{}'".format(
+                        int(df_ref_option.Nr), self.year, self.scenario)
+                    df3 = psql.read_sql(sql, self.engine)
                 if not df3.empty:  # can use reference option
                     print(f"Adding new CatJaarScen for optie {new_optie_nr}/{new_opt}, based on reference option {ref_option_name}")
                     df3.Categorie = new_optie_nr

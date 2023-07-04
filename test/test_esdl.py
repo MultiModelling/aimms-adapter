@@ -2,7 +2,7 @@ import unittest
 import esdl
 from esdl.esdl_handler import EnergySystemHandler
 
-from tno.aimms_adapter.model.opera_accessdb.opera_access_importer import OperaAccessImporter
+from tno.aimms_adapter.model.opera_accessdb.opera_access_importer import OperaAccessImporter, copy_clean_access_database
 from tno.aimms_adapter.model.opera_accessdb.results_processor import OperaResultsProcessor
 from tno.aimms_adapter.model.opera_esdl_parser.esdl_parser import OperaESDLParser
 from tno.aimms_adapter.model.opera_esdl_parser.unit import UnitException
@@ -67,11 +67,13 @@ class TestESDLParseAndImport(unittest.TestCase):
     def test_importer(self):
         parser = OperaESDLParser()
         esh = EnergySystemHandler()
-        esh.load_file('MACRO 12b.esdl')
+        esh.load_file('MACRO 13.esdl')
         df = parser.parse(esh.to_string())
         print(df)
         oai = OperaAccessImporter()
         access_file = r"C:\data\git\mmvib\opera-adapter\test\Opties_test.mdb"
+        empty_db_file = r"C:\data\git\mmvib\opera-adapter\test\opera\clean_db\Opties_mmvib.mdb"
+        copy_clean_access_database(empty_db_file, access_file)
         oai.start_import(esdl_data_frame=df, access_database=access_file)
 
     def test_result_parser(self):
