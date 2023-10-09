@@ -79,7 +79,7 @@ class Opera(Model):
         # success, error = ul.esdl_to_db(input_esdl)
         parser = OperaESDLParser()
         try:
-            esdl_in_dataframe = parser.parse(esdl_string=input_esdl)
+            esdl_in_dataframe, carriers = parser.parse(esdl_string=input_esdl)
         except Exception as e:
             logger.error(f"Parse exception for ESDL input: {e}")
             return ModelRunInfo(
@@ -91,7 +91,7 @@ class Opera(Model):
         copy_clean_access_database(EnvSettings.clean_access_database(), EnvSettings.access_database())
         logger.info("Importing ESDL into Opera database")
         oai = OperaAccessImporter()
-        oai.start_import(esdl_data_frame=esdl_in_dataframe, access_database=EnvSettings.access_database())
+        oai.start_import(esdl_data_frame=esdl_in_dataframe, carriers=carriers, access_database=EnvSettings.access_database())
         # start aimms via subprocess
         print(f"AIMMS binary at {EnvSettings.aimms_exe_path()}")
         print(f"AIMMS model at {EnvSettings.aimms_model_path()}")

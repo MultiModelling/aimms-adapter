@@ -48,6 +48,7 @@ class OperaAccessImporter:
     scenario = 'MMvIB'
     default_sector = 'Energie'
     df: pd.DataFrame = None  # df with ESDL as a table
+    carriers: pd.DataFrame = None  # df with carriers and prices
     engine = None  # db engine
     conn = None  # db connection
     cursor = None  # db cursor
@@ -77,14 +78,16 @@ class OperaAccessImporter:
         self.cursor.close()
         self.conn.close()
 
-    def start_import(self, esdl_data_frame: pd.DataFrame, access_database: str):
+    def start_import(self, esdl_data_frame: pd.DataFrame, carriers: pd.DataFrame, access_database: str):
         """
         Connects to database file and uses esdl-dataframe to create opera database
-        :param esdl_data_frame:
-        :param access_database:
+        :param esdl_data_frame: dataframe extracting all relevant info for all the assets in the ESDL
+        :param carriers: dataframe describing the carriers in the ESDL
+        :param access_database: the path to the access database
         :return:
         """
         self.df = esdl_data_frame
+        self.carriers = carriers
         is_consumer = self.df['category'] == 'Consumer'
         self.not_consumer_options = self.df[~is_consumer]
         self.consumer_options = self.df[is_consumer]
@@ -99,10 +102,12 @@ class OperaAccessImporter:
         log.info("Import to Opera finished")
 
     def _create_energycarriers(self):
-        carriers = pd.concat([self.df['carrier_in'], self.df['carrier_out']]).dropna().unique()
-        for carrier in carriers:
-            if carrier == "": continue
-            new_carrier_name = opera_energycarrier(carrier)
+        # TODO: use ESDL price information for carriers
+        #carriers = pd.concat([self.df['carrier_in'], self.df['carrier_out']]).dropna().unique()
+        for index, carrier in self.carriers.iterrows():
+            #if carrier == "": continue
+            carrier_name = carrier['name']
+            new_carrier_name = opera_energycarrier(carrier['name'])
             sql = "SELECT * FROM [Energiedragers] WHERE [Energiedrager] = '{}'".format(new_carrier_name)
             df = psql.read_sql(sql, self.engine)
             if df.shape[0] == 0:  # not in table yet, insert
@@ -112,28 +117,32 @@ class OperaAccessImporter:
                 electriciteit = False
                 warmte = False
                 # TODO: use
-                price = 0
-                if carrier.lower().startswith("ele"):
+                price = 0.0
+                if not_empty(carrier['cost']):
+                    price = float(carrier['cost'])
+                    print("Using ESDL-defined energy carrier cost")
+                # rest of the if statement in case no cost is assigned
+                elif carrier_name.lower().startswith("ele"):
                     vraagisaanbod = True
                     generiek = True
                     basisenergiedrager = True
                     electriciteit = True
                     price = 10.11  # EUR/MWh
-                elif carrier.lower().startswith("hydrogen") or carrier.lower().startswith(
-                        "waterstof") or carrier.lower().startswith("h2"):
+                elif carrier_name.lower().startswith("hydrogen") or carrier_name.lower().startswith(
+                        "waterstof") or carrier_name.lower().startswith("h2"):
                     vraagisaanbod = True
                     generiek = True
                     price = 8.34  # EUR/GJ
-                elif carrier.lower().startswith("aardgas") or carrier.lower().startswith("natural") or \
-                        carrier.lower().startswith("fossil gas") or carrier.lower().startswith("gas"):
+                elif carrier_name.lower().startswith("aardgas") or carrier_name.lower().startswith("natural") or \
+                        carrier_name.lower().startswith("fossil gas") or carrier_name.lower().startswith("gas"):
                     basisenergiedrager = True
                     price = 6.8  # EUR/GJ (KEV 2020 in EUR 2015)
-                elif carrier.lower().startswith("heat") or carrier.lower().startswith("warmte"):
+                elif carrier_name.lower().startswith("heat") or carrier_name.lower().startswith("warmte"):
                     vraagisaanbod = True
                     generiek = True
                     warmte = True
                 else:
-                    print(f"EnergyCarrier {carrier} is not matched to a similar energy carrier in Opera, using default values")
+                    print(f"EnergyCarrier {carrier_name} is not matched to a similar energy carrier in Opera, using default values")
 
                 print(f"Inserting new Energy carrier {new_carrier_name}")
                 sql = f"INSERT INTO [Energiedragers] ([Energiedrager],[Eenheid],[VraagIsAanbod], [Generiek], [Basisenergiedrager], [Elektriciteit], [Warmte]) " \
@@ -147,6 +156,8 @@ class OperaAccessImporter:
                           f" VALUES ('{new_carrier_name}', {self.year}, '{self.scenario}', {price});"
                     print(sql)
                     self.cursor.execute(sql)
+                else:
+                    print(f"WARNING: No price is set for {new_carrier_name}")
             else:
                 print(f"Energy carrier {new_carrier_name} already present")
         self.conn.commit()
@@ -199,6 +210,7 @@ class OperaAccessImporter:
                     if df_ref_option.empty:
                         print(f"#######################      There is no Opera equivalent defined for {new_opt}, creating a new one!  ###################")
                         df_ref_option = pd.DataFrame([{'Nr': 1}])  # create dataframe with one row.
+                        df_ref_option['Doelstof'] = 'CO2'  # Default doelstof in Opera
                     df_ref_option = df_ref_option.drop('Nr', axis=1)
                     df_ref_option['Naam optie'] = '{}'.format(new_opt)
                     df_ref_option['Sector'] = 'Energie'  # use an unused sector in opera for now (see Sectoren table)
@@ -212,6 +224,11 @@ class OperaAccessImporter:
                         df_ref_option['Unit of Capacity'] = 'GW'
                         df_ref_option['Eenheid activiteit'] = 'PJ'
                         df_ref_option['Cap2Act'] = 31.536
+                        df_ref_option['Capaciteit onbeperkt'] = True   # Fix to get Opera working
+                        df_ref_option['Optie onbeperkt'] = True   # Fix to get Opera working
+                        #df_ref_option['ReferentieOptie'] = -1   # Fix to get Opera working
+                        # df_ref_option['Landelijk beperkt'] = True   # Fix only needed for Windturbine
+
                     col = [[i] for i in df_ref_option.columns]
                     sql = 'INSERT INTO [Opties] ({}) VALUES ({}{})'.format(str(col)[1:-1],
                             '?,' * (len(df_ref_option.columns) - 1), '?').replace("'", "")
@@ -238,19 +255,21 @@ class OperaAccessImporter:
 
         config_storage = {'Unit of Capacity': 'PJ'}
         sql = f"INSERT INTO [Opties] ([Naam optie], [Unit of Capacity], [Eenheid activiteit], [Cap2Act], [Sector], " \
-              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie], [Levensduur]) VALUES (" \
-              f"'{row['name']}', 'PJ', 'PJ', 1, '{self.default_sector}', {False}, {False}, {True}, {lifetime})"
+              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie], [Levensduur], [Doelstof]) VALUES (" \
+              f"'{row['name']}', 'PJ', 'PJ', 1, '{self.default_sector}', {False}, {False}, {True}, {lifetime}, 'CO2')"
         print(sql)
         self.cursor.execute(sql)
         storage_id = self.cursor.execute("SELECT @@Identity").fetchone()[0]
         sql = f"INSERT INTO [Opties] ([Naam optie], [Unit of Capacity], [Eenheid activiteit], [Cap2Act], [Sector], " \
-              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie], [Levensduur]) VALUES (" \
-              f"'{chargerName}', 'GW', 'PJ', {31.536}, '{self.default_sector}', {True}, {False}, {False}, {lifetime})"
+              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie], [Levensduur], " \
+              f"[Doelstof], [ConnectorPointOption]) VALUES (" \
+              f"'{chargerName}', 'GW', 'PJ', {31.536}, '{self.default_sector}', {True}, {False}, {False}, {lifetime}," \
+              f" 'CO2', {True})"
         self.cursor.execute(sql)
         charger_id = self.cursor.execute("SELECT @@Identity").fetchone()[0]
         sql = f"INSERT INTO [Opties] ([Naam optie], [Unit of Capacity], [Eenheid activiteit], [Cap2Act], [Sector], " \
-              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie], [Levensduur]) VALUES (" \
-              f"'{dischargerName}','GW', 'PJ', {31.536}, '{self.default_sector}', {False}, {True}, {False}, {lifetime})"
+              f"[LaadOpslagOptie], [OntlaadOpslagOptie], [VoorraadOpslagOptie], [Levensduur], [Doelstof]) VALUES (" \
+              f"'{dischargerName}','GW', 'PJ', {31.536}, '{self.default_sector}', {False}, {True}, {False}, {lifetime}, 'CO2')"
         self.cursor.execute(sql)
         discharger_id = self.cursor.execute("SELECT @@Identity").fetchone()[0]
 
@@ -405,8 +424,11 @@ class OperaAccessImporter:
             max_capacity = row['power_max'] if not pd.isna(row['power_max']) else 0  # None
             min_capacity = row['power_min'] if not pd.isna(row['power_min']) else 0
             # currently not filling in columns [Max aantal], [Max kosten], [Min aantal], [Min kosten],
-            sql = f'INSERT INTO [CatJaarScen(categorie,jaar,scenario)] ([Categorie], [Jaar], [Scenario], [Max totale capaciteit], [Min totale capaciteit]) ' \
-                  f"VALUES ('{storage_id}', '{self.year}', '{self.scenario}', {max_capacity}, {min_capacity});"
+            sql = f'INSERT INTO [CatJaarScen(categorie,jaar,scenario)] ([Categorie], [Jaar], [Scenario], ' \
+                  f'[Max aantal], [Max kosten], [Min aantal], [Min kosten], ' \
+                  f'[Max totale capaciteit], [Min totale capaciteit], [Min Activiteit Jaar], [Max Activiteit Jaar]) ' \
+                  f"VALUES ('{storage_id}', '{self.year}', '{self.scenario}', 0,0,0,0, " \
+                  f"{max_capacity}, {min_capacity}, 0, 0 );"
             self.cursor.execute(sql)
             self.conn.commit()
         else:
@@ -565,6 +587,10 @@ class OperaAccessImporter:
                     df3.Categorie = new_optie_nr
                     df3['Max totale capaciteit'] = row['power_max'] if not pd.isna(row['power_max']) else None
                     df3['Min totale capaciteit'] = row['power_min'] if not pd.isna(row['power_min']) else 0
+                    df3['Max Activiteit Jaar'] = 0
+                    df3['Min Activiteit Jaar'] = 0
+                    df3['ActiviteitMinimaalGelijkBaseline'] = False  # Fix to get Opera  working
+
 
                     col = [[i] for i in df3.columns]
                     sql = 'INSERT INTO [CatJaarScen(categorie,jaar,scenario)] ({}) VALUES ({}{})'.format(str(col)[1:-1], '?,' * (len(df3.columns) - 1), '?').replace("'", "")
@@ -579,8 +605,10 @@ class OperaAccessImporter:
                     max_capacity = row['power_max'] if not pd.isna(row['power_max']) else 0 #None
                     min_capacity = row['power_min'] if not pd.isna(row['power_min']) else 0
                     # currently not filling in columns [Max aantal], [Max kosten], [Min aantal], [Min kosten],
-                    sql = f'INSERT INTO [CatJaarScen(categorie,jaar,scenario)] ([Categorie], [Jaar], [Scenario], [Max totale capaciteit], [Min totale capaciteit]) ' \
-                          f"VALUES ('{new_optie_nr}', '{self.year}', '{self.scenario}', {max_capacity}, {min_capacity});"
+                    sql = f'INSERT INTO [CatJaarScen(categorie,jaar,scenario)] ([Categorie], [Jaar], [Scenario], ' \
+                          f'[Max aantal], [Max kosten], [Min aantal], [Min kosten], ' \
+                          f'[Max totale capaciteit], [Min totale capaciteit], [Min Activiteit Jaar], [Max Activiteit Jaar]) ' \
+                          f"VALUES ('{new_optie_nr}', '{self.year}', '{self.scenario}', 0, 0, 0, 0, {max_capacity}, {min_capacity}, {0}, {0});"
                     #print(sql)
                     self.cursor.execute(sql)
 

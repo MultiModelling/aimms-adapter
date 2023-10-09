@@ -46,6 +46,12 @@ COST_IN_Eur_per_MWh = esdl.QuantityAndUnitType(description="Cost in €/MWh", id
                                         perMultiplier=esdl.MultiplierEnum.MEGA,
                                         perUnit=esdl.UnitEnum.WATTHOUR)
 
+COST_IN_Eur_per_GJ = esdl.QuantityAndUnitType(description="Cost in €/GJ", id="COST_in_EURperGJ",
+                                        physicalQuantity=esdl.PhysicalQuantityEnum.COST,
+                                        unit=esdl.UnitEnum.EURO,
+                                        perMultiplier=esdl.MultiplierEnum.GIGA,
+                                        perUnit=esdl.UnitEnum.JOULE)
+
 
 COST_IN_MEur_per_GW_per_year = esdl.QuantityAndUnitType(description="Cost in M€/GW/yr", id="COST_in_MEURperGWperYear",
                                         physicalQuantity=esdl.PhysicalQuantityEnum.COST,

@@ -60,21 +60,22 @@ class TestESDLParseAndImport(unittest.TestCase):
     def test_parser(self):
         parser = OperaESDLParser()
         esh = EnergySystemHandler()
-        esh.load_file('MACRO 12b.esdl')
-        df = parser.parse(esh.to_string())
-        print(df)
+        esh.load_file('MACRO 16.esdl')
+        assets, carriers = parser.parse(esh.to_string())
+        assets.to_csv('macro16.csv')
+        print(assets, carriers)
 
     def test_importer(self):
         parser = OperaESDLParser()
         esh = EnergySystemHandler()
-        esh.load_file('MACRO 13.esdl')
-        df = parser.parse(esh.to_string())
-        print(df)
+        esh.load_file('MACRO 16.esdl')
+        df, carriers = parser.parse(esh.to_string())
+        print(df, carriers)
         oai = OperaAccessImporter()
         access_file = r"C:\data\git\mmvib\opera-adapter\test\Opties_test.mdb"
         empty_db_file = r"C:\data\git\mmvib\opera-adapter\test\opera\clean_db\Opties_mmvib.mdb"
         copy_clean_access_database(empty_db_file, access_file)
-        oai.start_import(esdl_data_frame=df, access_database=access_file)
+        oai.start_import(esdl_data_frame=df, carriers=carriers, access_database=access_file)
 
     def test_result_parser(self):
         import os

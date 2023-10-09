@@ -3,7 +3,8 @@ from typing import Tuple, Union, Optional, List
 
 from esdl.esdl_handler import EnergySystemHandler
 from .unit import convert_to_unit, POWER_IN_GW, ENERGY_IN_PJ, COST_IN_MEur, POWER_IN_W, COST_IN_Eur_per_MWh, \
-    ENERGY_IN_J, UnitException, COST_IN_MEur_per_GW, COST_IN_MEur_per_GW_per_year, COST_IN_MEur_per_PJ
+    ENERGY_IN_J, UnitException, COST_IN_MEur_per_GW, COST_IN_MEur_per_GW_per_year, COST_IN_MEur_per_PJ, \
+    COST_IN_Eur_per_GJ
 import esdl
 import pandas as pd
 
@@ -21,11 +22,11 @@ class OperaESDLParser:
     def get_energy_system_Hander(self) -> EnergySystemHandler:
         return self.esh
 
-    def parse(self, esdl_string: str) -> pd.DataFrame:
+    def parse(self, esdl_string: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Extracts Cost, ranges of production and values of demand
         :param esdl_string:
-        :return:
+        :return: Tuple of 2 dataframes: assets and carriers
         """
         print(f"Power unit : {POWER_IN_GW.description}")
         print(f"Energy unit: {ENERGY_IN_PJ.description}")
@@ -111,7 +112,28 @@ class OperaESDLParser:
 
         #print(df)
         df.to_csv('output.csv')
-        return df
+
+        # carrier prices
+        df_carriers = pd.DataFrame({'name': pd.Series(dtype='str'),
+                                    'id': pd.Series(dtype='str'),
+                                    'cost': pd.Series(dtype='float'),
+                                    'unit': pd.Series(dtype='str'),
+                                    })
+        carrier_list: List[esdl.Carrier] = self.esh.get_all_instances_of_type(esdl.Carrier)
+        for carrier in carrier_list:
+            if carrier.cost:
+                price = extract_singlevalue(carrier.cost)
+                if carrier.cost.profileQuantityAndUnit:
+                    qau = carrier.cost.profileQuantityAndUnit
+                    target_unit = COST_IN_Eur_per_GJ
+                    if isinstance(carrier, esdl.ElectricityCommodity):
+                        target_unit = COST_IN_Eur_per_MWh
+                    price = convert_to_unit(price, qau, target_unit)
+            df_carriers = df_carriers.append({'name': carrier.name, 'id': carrier.id, 'cost': price, 'unit': target_unit.description}, ignore_index=True)
+            print(f'Carrier {carrier.name} has cost {price} {target_unit.description}')
+
+        print(df_carriers)
+        return df, df_carriers
 
 class ParseException(Exception):
     pass
@@ -298,7 +320,7 @@ def find_opera_equivalent(asset: esdl.EnergyAsset) -> str | None:
         panel: esdl.PVPanel = asset
         return "Solar-PV Residential" # or "Solar -PV industry" # mind the space!
     elif isinstance(asset, esdl.Import):
-        carrier:str = None
+        carrier: str = None
         for port in asset.port:
             if isinstance(port, esdl.OutPort):
                 carrier = port.carrier.name if port.carrier else None
@@ -306,22 +328,23 @@ def find_opera_equivalent(asset: esdl.EnergyAsset) -> str | None:
             if carrier.lower().startswith("elec"):
                 # electricity import
                 return "REF E import Flexnet"
-            elif carrier.lower().startswith("h2") or  carrier.lower().startswith("waterstof") or  carrier.lower().startswith("hydrogen"):
+            elif carrier.lower().startswith("h2") or carrier.lower().startswith("waterstof") or  carrier.lower().startswith("hydrogen"):
                 return "Import H2 to H2 domestic"
-            elif carrier.lower().startswith("aardgas") or  carrier.lower().startswith("natural gas"):
+            elif carrier.lower().startswith("aardgas") or carrier.lower().startswith("natural gas"):
                 return "REF Gaswinning en -import"
             else:
                 return None
     elif isinstance(asset, esdl.Export):
         # TODO: adapt to carriers as with import
         return "H2 domestic to export"
-    # elif isinstance(asset, esdl.PowerPlant):
-    #     asset:esdl.PowerPlant
-    #     if asset.fuel == esdl.PowerPlantFuelEnum.URANIUM:
-    #         return "Nuclear energy Gen IV - Electricity production"
-    #     else:
-    #         print(f"Cannot map {asset.name} to an Opera equivalent")
-    #         return None
+    elif isinstance(asset, esdl.PowerPlant):
+        asset: esdl.PowerPlant
+        if asset.fuel == esdl.PowerPlantFuelEnum.URANIUM:
+            #return "Nuclear energy Gen IV - Electricity production"
+            return "REF Kernenergie  IBO 7500u 2017"
+        else:
+            print(f"Cannot map {asset.name} to an Opera equivalent")
+            return None
     else:
         print(f"Cannot map {asset.name} to an Opera equivalent")
         return None
