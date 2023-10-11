@@ -12,7 +12,7 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 200)
 
 # current asset types that are not supported by this parser or Opera import
-IGNORED_ASSETS_TUPLE = (esdl.Transport, esdl.Import, esdl.Export)
+IGNORED_ASSETS_TUPLE = (esdl.Transport, esdl.Export)
 
 
 class OperaESDLParser:
@@ -77,6 +77,9 @@ class OperaESDLParser:
                         power_range = tuple([convert_to_unit(v, unit, POWER_IN_GW) for v in power_range])
                     if hasattr(asset, 'power'):
                         max_power = convert_to_unit(asset.power, POWER_IN_W, POWER_IN_GW) if asset.power else None
+                    # if not power_range and max_power:
+                    #     # use max power as range
+                    #     power_range = (max_power, max_power)
 
                     capacity_range, unit = extract_range(asset, 'capacity')
                     if capacity_range:
@@ -129,7 +132,9 @@ class OperaESDLParser:
                     if isinstance(carrier, esdl.ElectricityCommodity):
                         target_unit = COST_IN_Eur_per_MWh
                     price = convert_to_unit(price, qau, target_unit)
-            df_carriers = df_carriers.append({'name': carrier.name, 'id': carrier.id, 'cost': price, 'unit': target_unit.description}, ignore_index=True)
+            carrier_df = pd.DataFrame([{'name': carrier.name, 'id': carrier.id, 'cost': price, 'unit': target_unit.description}])
+            #df_carriers = df_carriers.append({'name': carrier.name, 'id': carrier.id, 'cost': price, 'unit': target_unit.description}, ignore_index=True)
+            df_carriers = pd.concat([df_carriers, carrier_df], ignore_index=True)
             print(f'Carrier {carrier.name} has cost {price} {target_unit.description}')
 
         print(df_carriers)

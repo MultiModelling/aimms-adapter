@@ -82,8 +82,8 @@ class TestESDLParseAndImport(unittest.TestCase):
         print(os.getcwd())
         parser = OperaESDLParser()
         esh = EnergySystemHandler()
-        esh.load_file('MACRO 7.esdl')
-        df = parser.parse(esh.to_string())
+        esh.load_file('MACRO 16.esdl')
+        df, carriers = parser.parse(esh.to_string())
         orp = OperaResultsProcessor(output_path='opera/CSV MMvIB 2030', esh=esh, input_df=df)
         orp.update_production_capacities()
 

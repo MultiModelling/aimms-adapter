@@ -39,14 +39,19 @@ logging.config.dictConfig(
                 "class": "logging.StreamHandler",
                 # Also output json in test because output in VSCode doesn't handle it.
                 "formatter": "colored" if EnvSettings.env() == "dev" else "json",
-            }
+            },
+            "file": {
+                "level": "DEBUG",
+                "class": "logging.handlers.WatchedFileHandler",
+                "filename": "opera_adapter.log",
+            },
         },
         "loggers": {
-            "": {"handlers": ["default"], "level": "INFO"},
+            "": {"handlers": ["default", "file"], "level": "INFO"},
             "alembic": {"handlers": ["default"], "level": "INFO"},
             "tno": {
-                "handlers": ["default"],
-                "level": "INFO" if EnvSettings.is_production() else "DEBUG",
+                "handlers": ["default", "file"],
+                "level": "DEBUG",  # "INFO" if EnvSettings.is_production() else "DEBUG",
                 "propagate": False,
             },
         },
